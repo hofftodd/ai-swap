@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ai-swap</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
+  --border: #e3e2dd; --accent: #2f6fde; --accent-text: #fff;
+  --user: #eef3fd; --code: #f1f0ec; --ok: #1f8a4c; --warn: #b7791f; --bad: #c53030;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9a9a93;
+    --border: #33332f; --accent: #6b9cf5; --accent-text: #0d0d0c;
+    --user: #22293a; --code: #2a2a27; --ok: #4ccb84; --warn: #e2b04a; --bad: #f07171;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 100%;
+}
+button, select, textarea { font: inherit; color: inherit; }
+button {
+  border: 1px solid var(--border); background: var(--panel); border-radius: 8px;
+  padding: 6px 12px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+button.small { padding: 2px 8px; font-size: 13px; }
+aside {
+  border-right: 1px solid var(--border); background: var(--panel);
+  display: flex; flex-direction: column; min-height: 0;
+}
+aside header { padding: 14px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+aside h1 { font-size: 16px; margin: 0; }
+#chats { flex: 1; overflow: auto; padding: 0 8px; }
+.chat-item {
+  padding: 8px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; display: flex; justify-content: space-between; gap: 6px;
+}
+.chat-item:hover { background: var(--bg); }
+.chat-item.active { background: var(--user); }
+.chat-item .del { visibility: hidden; color: var(--muted); border: 0; background: none; padding: 0 4px; }
+.chat-item:hover .del { visibility: visible; }
+#nodes { border-top: 1px solid var(--border); padding: 12px 14px; font-size: 13px; }
+.node { margin-bottom: 10px; }
+.node .name { display: flex; justify-content: space-between; }
+.bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+.bar > div { height: 100%; background: var(--accent); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.topbar {
+  display: flex; gap: 10px; align-items: center; padding: 10px 16px;
+  border-bottom: 1px solid var(--border); background: var(--panel);
+}
+.topbar select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); max-width: 60vw; }
+.topbar .spacer { flex: 1; }
+#modelState { font-size: 13px; color: var(--muted); }
+#view-chat, #view-models { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#messages { flex: 1; overflow: auto; padding: 24px 16px; }
+.msg { max-width: 820px; margin: 0 auto 18px; }
+.msg .role { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.msg .body { padding: 10px 14px; border-radius: 10px; overflow-wrap: anywhere; }
+.msg.user .body { background: var(--user); white-space: pre-wrap; }
+.msg.assistant .body { background: var(--panel); border: 1px solid var(--border); }
+.msg .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.msg.error .body { border-color: var(--bad); color: var(--bad); }
+.body pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; }
+.body code { background: var(--code); padding: 1px 4px; border-radius: 4px; font: 13px/1.45 ui-monospace, Menlo, monospace; }
+.body pre code { background: none; padding: 0; }
+.body p { margin: 0 0 8px; } .body p:last-child { margin-bottom: 0; }
+details.thinking { margin-bottom: 8px; color: var(--muted); font-size: 14px; }
+details.thinking > div { white-space: pre-wrap; border-left: 2px solid var(--border); padding-left: 10px; }
+.composer { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 16px; }
+.composer form { max-width: 820px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
+.composer textarea {
+  flex: 1; resize: none; min-height: 44px; max-height: 240px; padding: 10px 12px;
+  border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
+}
+.empty { color: var(--muted); text-align: center; margin-top: 18vh; }
+#view-models { overflow: auto; padding: 16px; }
+table { border-collapse: collapse; width: 100%; max-width: 1100px; margin: 0 auto; }
+th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
+th { color: var(--muted); font-weight: 500; }
+#logs {
+  max-width: 1100px; margin: 16px auto; white-space: pre-wrap; background: var(--code);
+  padding: 12px; border-radius: 8px; font: 12px/1.4 ui-monospace, Menlo, monospace;
+  max-height: 50vh; overflow: auto; display: none;
+}
+.hidden { display: none !important; }
+@media (max-width: 760px) {
+  body { grid-template-columns: 1fr; }
+  aside { display: none; }
+  body.show-side aside { display: flex; position: fixed; inset: 0 25% 0 0; z-index: 5; }
+}
+</style>
+</head>
+<body>
+<aside>
+  <header>
+    <h1>ai-swap</h1>
+    <button class="small" id="newChat">New chat</button>
+  </header>
+  <div id="chats"></div>
+  <div id="nodes"></div>
+</aside>
+<main>
+  <div class="topbar">
+    <button class="small" id="sideToggle" title="Chats">☰</button>
+    <select id="model" aria-label="Model"></select>
+    <span id="modelState"></span>
+    <span class="spacer"></span>
+    <button class="small" id="tabChat">Chat</button>
+    <button class="small" id="tabModels">Models</button>
+  </div>
+
+  <section id="view-chat">
+    <div id="messages"></div>
+    <div class="composer">
+      <form id="form">
+        <textarea id="input" rows="1" placeholder="Message (Enter to send, Shift+Enter for newline)"></textarea>
+        <button class="primary" id="send" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+
+  <section id="view-models" class="hidden">
+    <table>
+      <thead><tr><th>Model</th><th>Node</th><th>Engine</th><th>State</th><th>Memory</th><th></th></tr></thead>
+      <tbody id="modelRows"></tbody>
+    </table>
+    <div id="logs"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+let chats = store.get("aiswap.chats", []);
+let currentId = store.get("aiswap.current", null);
+let models = [];
+let status = null;
+let abort = null;
+
+const stateColor = { ready: "var(--ok)", starting: "var(--warn)", stopping: "var(--warn)", failed: "var(--bad)", stopped: "var(--muted)" };
+
+function current() { return chats.find(c => c.id === currentId); }
+function save() { store.set("aiswap.chats", chats); store.set("aiswap.current", currentId); }
+
+function newChat() {
+  const c = { id: crypto.randomUUID(), title: "New chat", model: $("model").value, messages: [] };
+  chats.unshift(c); currentId = c.id; save(); render();
+  $("input").focus();
+}
+
+// ---- rendering ---------------------------------------------------------
+
+function esc(s) { return s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
+
+// Minimal markdown: fenced code, inline code, bold, paragraphs.
+function md(src) {
+  const parts = src.split(/```/);
+  return parts.map((p, i) => {
+    if (i % 2 === 1) {
+      const nl = p.indexOf("\n");
+      const code = nl >= 0 ? p.slice(nl + 1) : p;
+      return "<pre><code>" + esc(code.replace(/\n$/, "")) + "</code></pre>";
+    }
+    return p.split(/\n{2,}/).filter(x => x.trim()).map(para =>
+      "<p>" + esc(para)
+        .replace(/`([^`]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/\n/g, "<br>") + "</p>").join("");
+  }).join("");
+}
+
+function renderChats() {
+  $("chats").innerHTML = "";
+  for (const c of chats) {
+    const el = document.createElement("div");
+    el.className = "chat-item" + (c.id === currentId ? " active" : "");
+    el.innerHTML = `<span>${esc(c.title)}</span><button class="del" title="Delete">✕</button>`;
+    el.onclick = () => { currentId = c.id; if (c.model) $("model").value = c.model; save(); render(); };
+    el.querySelector(".del").onclick = (e) => {
+      e.stopPropagation();
+      chats = chats.filter(x => x.id !== c.id);
+      if (currentId === c.id) currentId = chats[0]?.id ?? null;
+      save(); render();
+    };
+    $("chats").appendChild(el);
+  }
+}
+
+function msgEl(m) {
+  const el = document.createElement("div");
+  el.className = "msg " + m.role + (m.error ? " error" : "");
+  const who = m.role === "user" ? "You" : (m.model || "assistant");
+  let inner = "";
+  if (m.thinking) inner += `<details class="thinking"${m.content ? "" : " open"}><summary>Thinking</summary><div>${esc(m.thinking)}</div></details>`;
+  inner += m.role === "user" ? esc(m.content) : md(m.content || (m.thinking ? "" : "…"));
+  el.innerHTML = `<div class="role">${esc(who)}</div><div class="body">${inner}</div>` +
+    (m.meta ? `<div class="meta">${esc(m.meta)}</div>` : "");
+  return el;
+}
+
+function renderMessages() {
+  const box = $("messages");
+  const c = current();
+  box.innerHTML = "";
+  if (!c || c.messages.length === 0) {
+    box.innerHTML = `<div class="empty">Pick a model and start typing.<br>Models load on first use; big ones can take a minute.</div>`;
+    return;
+  }
+  for (const m of c.messages) box.appendChild(msgEl(m));
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderModelSelect() {
+  const sel = $("model");
+  const prev = sel.value || current()?.model || store.get("aiswap.model", "");
+  sel.innerHTML = "";
+  for (const m of models) {
+    const o = document.createElement("option");
+    o.value = m.id;
+    o.textContent = `${m.id}  ·  ${m.node}  ·  ${m.status}`;
+    sel.appendChild(o);
+  }
+  if (models.some(m => m.id === prev)) sel.value = prev;
+  updateModelState();
+}
+
+function updateModelState() {
+  const m = models.find(x => x.id === $("model").value);
+  $("modelState").innerHTML = m
+    ? `<span class="dot" style="background:${stateColor[m.status] || "var(--muted)"}"></span>${esc(m.engine)} on ${esc(m.node)}`
+    : (models.length ? "" : "no models configured");
+}
+
+function renderNodes() {
+  if (!status) return;
+  const nodes = [{ name: status.node.name, online: true, node: status.node }, ...status.peers];
+  $("nodes").innerHTML = nodes.map(p => {
+    const n = p.node;
+    if (!p.online || !n) return `<div class="node"><div class="name"><span><span class="dot" style="background:var(--bad)"></span>${esc(p.name)}</span><span>offline</span></div></div>`;
+    const pct = n.memory_budget_gb ? Math.min(100, 100 * n.memory_used_gb / n.memory_budget_gb) : 0;
+    const loaded = n.models.filter(m => m.state === "ready" || m.state === "starting").map(m => m.name).join(", ") || "idle";
+    return `<div class="node"><div class="name"><span><span class="dot" style="background:var(--ok)"></span>${esc(p.name)}</span>
+      <span>${n.memory_used_gb.toFixed(0)}/${n.memory_budget_gb ? n.memory_budget_gb.toFixed(0) : "∞"} GB</span></div>
+      <div class="bar"><div style="width:${pct}%"></div></div>
+      <div style="color:var(--muted);margin-top:3px">${esc(loaded)}</div></div>`;
+  }).join("");
+}
+
+function renderModelTable() {
+  if (!status) return;
+  const rows = [];
+  const add = (node, local, m) => rows.push({ node, local, ...m });
+  status.node.models.forEach(m => add(status.node.name, true, m));
+  status.peers.forEach(p => p.node?.models.forEach(m => add(p.name, false, m)));
+  $("modelRows").innerHTML = rows.map(r => {
+    const ref = r.local ? r.name : `${r.name}@${r.node}`;
+    return `<tr>
+      <td>${esc(r.name)}${r.aliases?.length ? `<div style="color:var(--muted);font-size:12px">${esc(r.aliases.join(", "))}</div>` : ""}</td>
+      <td>${esc(r.node)}</td><td>${esc(r.engine)}${r.runnable ? "" : " (n/a on this OS)"}</td>
+      <td><span class="dot" style="background:${stateColor[r.state]}"></span>${esc(r.state)}${r.error ? `<div style="color:var(--bad);font-size:12px">${esc(r.error)}</div>` : ""}</td>
+      <td>${r.memory_gb ? r.memory_gb + " GB" : "—"}</td>
+      <td style="white-space:nowrap">
+        <button class="small" data-act="load" data-ref="${esc(ref)}" ${r.runnable ? "" : "disabled"}>Load</button>
+        <button class="small" data-act="unload" data-ref="${esc(ref)}">Unload</button>
+        <button class="small" data-act="logs" data-ref="${esc(ref)}">Logs</button>
+      </td></tr>`;
+  }).join("");
+}
+
+function render() { renderChats(); renderMessages(); updateModelState(); }
+
+// ---- data --------------------------------------------------------------
+
+async function refresh() {
+  try {
+    const [mr, sr] = await Promise.all([fetch("/v1/models"), fetch("/api/status")]);
+    models = (await mr.json()).data;
+    status = await sr.json();
+    renderModelSelect(); renderNodes(); renderModelTable();
+  } catch (e) { /* server restarting; try again next tick */ }
+}
+
+async function send(text) {
+  let c = current();
+  if (!c) { newChat(); c = current(); }
+  const model = $("model").value;
+  if (!model) return;
+  c.model = model;
+  store.set("aiswap.model", model);
+  if (c.messages.length === 0) c.title = text.slice(0, 48);
+  c.messages.push({ role: "user", content: text });
+  const reply = { role: "assistant", model, content: "", thinking: "" };
+  c.messages.push(reply);
+  save(); render();
+
+  const box = $("messages");
+  let el = box.lastElementChild;
+  const repaint = () => { const n = msgEl(reply); el.replaceWith(n); el = n; box.scrollTop = box.scrollHeight; };
+
+  abort = new AbortController();
+  $("send").textContent = "Stop";
+  const t0 = performance.now();
+  let tFirst = 0, chunks = 0, usage = null;
+  try {
+    const res = await fetch("/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: abort.signal,
+      body: JSON.stringify({
+        model, stream: true, stream_options: { include_usage: true },
+        messages: c.messages.slice(0, -1).filter(m => !m.error).map(m => ({ role: m.role, content: m.content })),
+      }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => ({}));
+      throw new Error(j.error?.message || res.statusText);
+    }
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue;
+        const data = line.slice(5).trim();
+        if (data === "[DONE]") continue;
+        let j; try { j = JSON.parse(data); } catch { continue; }
+        if (j.usage) usage = j.usage;
+        const d = j.choices?.[0]?.delta;
+        if (!d) continue;
+        const think = d.reasoning_content ?? d.reasoning ?? "";
+        if (think || d.content) { if (!tFirst) tFirst = performance.now(); chunks++; }
+        reply.thinking += think;
+        reply.content += d.content ?? "";
+        repaint();
+      }
+    }
+  } catch (e) {
+    if (e.name !== "AbortError") { reply.error = true; reply.content = "Error: " + e.message; }
+  } finally {
+    const secs = (performance.now() - (tFirst || t0)) / 1000;
+    const toks = usage?.completion_tokens ?? chunks;
+    const parts = [];
+    if (tFirst) parts.push(`first token ${((tFirst - t0) / 1000).toFixed(1)}s`);
+    if (toks && secs > 0) parts.push(`${(toks / secs).toFixed(1)} tok/s`);
+    if (usage) parts.push(`${usage.prompt_tokens} in / ${usage.completion_tokens} out`);
+    reply.meta = parts.join(" · ");
+    repaint(); save();
+    abort = null;
+    $("send").textContent = "Send";
+    refresh();
+  }
+}
+
+// ---- events ------------------------------------------------------------
+
+$("form").onsubmit = (e) => {
+  e.preventDefault();
+  if (abort) { abort.abort(); return; }
+  const text = $("input").value.trim();
+  if (!text) return;
+  $("input").value = ""; autosize();
+  send(text);
+};
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
+});
+function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 240) + "px"; }
+$("input").addEventListener("input", autosize);
+$("newChat").onclick = newChat;
+$("model").onchange = () => { const c = current(); if (c) { c.model = $("model").value; save(); } updateModelState(); };
+$("sideToggle").onclick = () => document.body.classList.toggle("show-side");
+$("tabChat").onclick = () => { $("view-chat").classList.remove("hidden"); $("view-models").classList.add("hidden"); };
+$("tabModels").onclick = () => { $("view-models").classList.remove("hidden"); $("view-chat").classList.add("hidden"); refresh(); };
+$("modelRows").onclick = async (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b) return;
+  const ref = encodeURIComponent(b.dataset.ref);
+  if (b.dataset.act === "logs") {
+    const r = await fetch(`/api/models/${ref}/logs`);
+    $("logs").style.display = "block";
+    $("logs").textContent = (await r.text()) || "(no output yet)";
+    $("logs").scrollTop = $("logs").scrollHeight;
+    return;
+  }
+  b.disabled = true; b.textContent = b.dataset.act === "load" ? "Loading…" : "Stopping…";
+  const r = await fetch(`/api/models/${ref}/${b.dataset.act}`, { method: "POST" });
+  if (!r.ok) alert((await r.json().catch(() => ({}))).error || r.statusText);
+  refresh();
+};
+
+render();
+refresh();
+setInterval(refresh, 3000);
+</script>
+</body>
+</html>

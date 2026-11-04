@@ -1,0 +1,357 @@
+// Package server is the HTTP front door: OpenAI- and Anthropic-compatible
+// inference endpoints that route to local or peer models, a small management
+// API, and the embedded chat UI.
+package server
+
+import (
+	"bytes"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"log/slog"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"runtime"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/hofftodd/ai-swap/internal/cluster"
+	"github.com/hofftodd/ai-swap/internal/config"
+	"github.com/hofftodd/ai-swap/internal/scheduler"
+)
+
+const maxBody = 64 << 20
+
+// inferencePaths are forwarded to backends, routed by the body's "model".
+var inferencePaths = []string{
+	"/v1/chat/completions",
+	"/v1/completions",
+	"/v1/embeddings",
+	"/v1/responses",
+	"/v1/messages",
+	"/v1/messages/count_tokens",
+}
+
+// Server wires the scheduler and cluster to HTTP.
+type Server struct {
+	cfg       *config.Config
+	mgr       *scheduler.Manager
+	cluster   *cluster.Cluster
+	log       *slog.Logger
+	transport http.RoundTripper
+	ui        fs.FS
+}
+
+// New builds the server. ui may be nil.
+func New(cfg *config.Config, mgr *scheduler.Manager, cl *cluster.Cluster, ui fs.FS, log *slog.Logger) *Server {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = 0 // prefill on huge prompts can take minutes
+	return &Server{cfg: cfg, mgr: mgr, cluster: cl, log: log, transport: t, ui: ui}
+}
+
+// Handler returns the root HTTP handler.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	for _, p := range inferencePaths {
+		mux.HandleFunc("POST "+p, s.handleInference)
+	}
+	mux.HandleFunc("GET /v1/models", s.handleModels)
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") })
+	mux.HandleFunc("GET /api/node", s.handleNode)
+	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("POST /api/models/{name}/load", s.handleLoad)
+	mux.HandleFunc("POST /api/models/{name}/unload", s.handleUnload)
+	mux.HandleFunc("GET /api/models/{name}/logs", s.handleLogs)
+	if s.ui != nil {
+		mux.Handle("GET /", http.FileServerFS(s.ui))
+	}
+	return s.logRequests(mux)
+}
+
+// route describes where a request for a model should go.
+type route struct {
+	local  string   // local model name, or ""
+	peer   *url.URL // peer base URL when not local
+	remote string   // model name on the peer
+}
+
+// resolve finds the model for a client-supplied name ("model", alias, or
+// "model@node").
+func (s *Server) resolve(name string, allowPeers bool) (route, bool) {
+	want, node, pinned := strings.Cut(name, "@")
+	if !pinned || node == s.cfg.Node.Name {
+		if m, ok := s.cfg.Resolve(want); ok {
+			if inst, _ := s.mgr.Get(m.Name); inst.Engine.Supported() {
+				return route{local: m.Name}, true
+			}
+		}
+	}
+	if allowPeers {
+		if u, remote, ok := s.cluster.Find(name); ok {
+			return route{peer: u, remote: remote}, true
+		}
+	}
+	return route{}, false
+}
+
+func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
+	if err != nil {
+		s.apiError(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", err.Error())
+		return
+	}
+	var head struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(body, &head); err != nil {
+		s.apiError(w, r, http.StatusBadRequest, "invalid_request_error", "body must be JSON: "+err.Error())
+		return
+	}
+	if head.Model == "" {
+		s.apiError(w, r, http.StatusBadRequest, "invalid_request_error", `"model" is required`)
+		return
+	}
+
+	rt, ok := s.resolve(head.Model, r.Header.Get(cluster.HopHeader) == "")
+	if !ok {
+		s.apiError(w, r, http.StatusNotFound, "not_found_error", fmt.Sprintf("model %q is not available on any node", head.Model))
+		return
+	}
+
+	if rt.peer != nil {
+		if rt.remote != head.Model {
+			body = rewriteModel(body, rt.remote)
+		}
+		s.proxy(w, r, body, rt.peer, true)
+		return
+	}
+
+	port, release, err := s.mgr.Acquire(r.Context(), rt.local)
+	if err != nil {
+		code := http.StatusServiceUnavailable
+		if errors.Is(err, r.Context().Err()) {
+			code = 499 // client went away while waiting for the model
+		}
+		s.apiError(w, r, code, "api_error", err.Error())
+		return
+	}
+	defer release()
+
+	m := s.cfg.Models[rt.local]
+	switch {
+	case m.UpstreamModel != "":
+		body = rewriteModel(body, m.UpstreamModel)
+	case head.Model != rt.local:
+		body = rewriteModel(body, rt.local)
+	}
+	s.proxy(w, r, body, &url.URL{Scheme: "http", Host: "127.0.0.1:" + strconv.Itoa(port)}, false)
+}
+
+func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte, target *url.URL, hop bool) {
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(target)
+			pr.Out.Host = target.Host
+			pr.Out.Body = io.NopCloser(bytes.NewReader(body))
+			pr.Out.ContentLength = int64(len(body))
+			pr.Out.Header.Set("Content-Length", strconv.Itoa(len(body)))
+			if hop {
+				pr.Out.Header.Set(cluster.HopHeader, "1")
+			}
+		},
+		Transport:     s.transport,
+		FlushInterval: -1, // stream SSE tokens as they arrive
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			s.apiError(w, r, http.StatusBadGateway, "api_error", "upstream: "+err.Error())
+		},
+	}
+	rp.ServeHTTP(w, r)
+}
+
+// rewriteModel replaces the top-level "model" field of a JSON body.
+func rewriteModel(body []byte, model string) []byte {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return body
+	}
+	obj["model"], _ = json.Marshal(model)
+	out, err := json.Marshal(obj)
+	if err != nil {
+		return body
+	}
+	return out
+}
+
+type modelEntry struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+	// Extra fields for the UI; OpenAI clients ignore them.
+	Node   string          `json:"node"`
+	Local  bool            `json:"local"`
+	Status scheduler.State `json:"status"`
+	Engine string          `json:"engine"`
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	var data []modelEntry
+	seen := map[string]bool{}
+	add := func(node string, local bool, st scheduler.Status) {
+		if !st.Runnable {
+			return
+		}
+		id := st.Name
+		if seen[id] {
+			id = st.Name + "@" + node // same name on two nodes: keep both addressable
+		}
+		seen[id] = true
+		data = append(data, modelEntry{
+			ID: id, Object: "model", OwnedBy: node,
+			Node: node, Local: local, Status: st.State, Engine: st.Engine,
+		})
+	}
+	for _, st := range s.mgr.Snapshot() {
+		add(s.cfg.Node.Name, true, st)
+	}
+	if r.Header.Get(cluster.HopHeader) == "" {
+		for _, p := range s.cluster.Peers() {
+			if p.Online && p.Node != nil {
+				for _, st := range p.Node.Models {
+					add(p.Name, false, st)
+				}
+			}
+		}
+	}
+	if data == nil {
+		data = []modelEntry{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+func (s *Server) nodeInfo() cluster.NodeInfo {
+	return cluster.NodeInfo{
+		Name: s.cfg.Node.Name, OS: runtime.GOOS, Arch: runtime.GOARCH,
+		MemoryBudgetGB: s.cfg.Node.MemoryBudgetGB,
+		MemoryUsedGB:   s.mgr.UsedGB(),
+		Models:         s.mgr.Snapshot(),
+	}
+}
+
+func (s *Server) handleNode(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, s.nodeInfo())
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"node":  s.nodeInfo(),
+		"peers": s.cluster.Peers(),
+	})
+}
+
+// handleLoad / handleUnload act on a local model, or forward "model@peer".
+func (s *Server) handleLoad(w http.ResponseWriter, r *http.Request) {
+	s.manage(w, r, "load")
+}
+
+func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
+	s.manage(w, r, "unload")
+}
+
+func (s *Server) manage(w http.ResponseWriter, r *http.Request, action string) {
+	rt, ok := s.resolve(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown model"})
+		return
+	}
+	if rt.peer != nil {
+		r.URL.Path = "/api/models/" + url.PathEscape(rt.remote) + "/" + action
+		s.proxy(w, r, nil, rt.peer, true)
+		return
+	}
+	var err error
+	if action == "load" {
+		err = s.mgr.Load(r.Context(), rt.local)
+	} else {
+		err = s.mgr.Unload(r.Context(), rt.local)
+	}
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	rt, ok := s.resolve(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
+	if !ok {
+		http.Error(w, "unknown model", http.StatusNotFound)
+		return
+	}
+	if rt.peer != nil {
+		r.URL.Path = "/api/models/" + url.PathEscape(rt.remote) + "/logs"
+		s.proxy(w, r, nil, rt.peer, true)
+		return
+	}
+	inst, _ := s.mgr.Get(rt.local)
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write(inst.Logs.Bytes())
+}
+
+// apiError writes an error in the shape the calling client expects.
+func (s *Server) apiError(w http.ResponseWriter, r *http.Request, code int, typ, msg string) {
+	if strings.HasPrefix(r.URL.Path, "/v1/messages") {
+		writeJSON(w, code, map[string]any{
+			"type":  "error",
+			"error": map[string]string{"type": typ, "message": msg},
+		})
+		return
+	}
+	writeJSON(w, code, map[string]any{
+		"error": map[string]string{"type": typ, "message": msg},
+	})
+}
+
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	code int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.code = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+// Flush keeps streaming working through the logging wrapper.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
+
+func (s *Server) logRequests(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/v1/") {
+			h.ServeHTTP(w, r)
+			return
+		}
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, code: http.StatusOK}
+		h.ServeHTTP(rec, r)
+		s.log.Info("request", "method", r.Method, "path", r.URL.Path,
+			"status", rec.code, "dur", time.Since(start).Round(time.Millisecond),
+			"forwarded", r.Header.Get(cluster.HopHeader) != "")
+	})
+}

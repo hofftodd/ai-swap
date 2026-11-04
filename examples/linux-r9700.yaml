@@ -1,0 +1,46 @@
+# ai-swap on the Linux box with the Radeon AI PRO R9700 (32 GB VRAM).
+# ds4 and Sushi are not available here (ds4's ROCm build targets Strix Halo,
+# and Sushi is macOS-only), so requests for those are routed to the Mac.
+
+node:
+  name: linux
+  listen: 0.0.0.0:8686
+  memory_budget_gb: 30   # VRAM on the R9700, minus a little headroom
+
+peers:
+  - name: mac
+    url: http://mac.local:8686
+
+defaults:
+  ttl: 30m
+  health_timeout: 10m
+
+engines:
+  llamacpp:
+    bin: ~/llama.cpp/build/bin/llama-server   # ROCm (HIP) or Vulkan build
+    args: [-ngl, "999", --flash-attn, "on"]
+
+models:
+  qwen-flash-next-strata:
+    engine: strata
+    # Strata's documented entry point (`strata launch`) is interactive. Replace
+    # this with its non-interactive server command once confirmed; keep
+    # ${PORT} so ai-swap can assign the port, or drop it and Strata will use
+    # its default 8080.
+    cmd: strata serve --family qwen38 --port ${PORT}
+    memory_gb: 28
+    aliases: [qwen-amd]
+
+  coder-gguf:
+    engine: llamacpp
+    model: ~/models/your-coder-model-Q4_K_M.gguf
+    ctx: 65536
+    memory_gb: 20
+    aliases: [coder]
+
+  embed:
+    engine: llamacpp
+    model: ~/models/your-embedding-model.gguf
+    memory_gb: 1
+    args: [--embeddings]
+    ttl: 0   # keep resident

@@ -1,0 +1,55 @@
+# ai-swap on the Mac (Apple Silicon). Runs Sushi and ds4 locally and routes
+# anything else to the Linux box.
+#
+# Validate and preview launch commands with:  ai-swap -config mac.yaml -check
+
+node:
+  name: mac
+  listen: 0.0.0.0:8686
+  # Share of unified memory models may use. Leave headroom for macOS; Sushi's
+  # docs warn that over-committing wired memory can kernel-panic the machine.
+  memory_budget_gb: 110
+
+peers:
+  - name: linux
+    url: http://linux.local:8686
+
+defaults:
+  ttl: 30m              # unload after 30 minutes idle
+  health_timeout: 15m   # first load of a 100 GB model can be slow
+
+engines:
+  sushi:
+    bin: /opt/homebrew/bin/sushi
+    # Sushi's docs only show its fixed address (127.0.0.1:12345). If it has a
+    # port flag, set it here and ai-swap will assign ports itself:
+    # port_flag: --port
+  ds4:
+    bin: ~/src/ds4/ds4-server
+    dir: ~/src/ds4
+    # ds4 keeps KV state on disk, which makes swapping back to it cheap.
+    args: [--kv-disk-dir, ~/.ds4/kvcache, --kv-disk-space-mb, "32768"]
+
+models:
+  qwen-flash-next:
+    engine: sushi
+    model: ~/.sushi/models/Qwen3.8-Flash-Next-Sushi-3bpw
+    ctx: 131072
+    memory_gb: 64
+    args: [--kv-quant, "8"]
+    aliases: [qwen]
+
+  deepseek-v4-flash:
+    engine: ds4
+    model: ds4flash.gguf
+    ctx: 65536
+    memory_gb: 100
+    aliases: [deepseek]
+
+  # Anything else that speaks the OpenAI API, e.g. a small MLX model for
+  # quick tasks. ${PORT} is assigned by ai-swap.
+  small-mlx:
+    engine: generic
+    cmd: mlx_lm.server --model mlx-community/Qwen3-4B-4bit --port ${PORT}
+    memory_gb: 4
+    ttl: 2h
