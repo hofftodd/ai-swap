@@ -40,6 +40,7 @@ one pool.
 - [Security](#security)
 - [Known gaps](#known-gaps)
 - [Development](#development)
+- [License](#license)
 
 ## Why
 
@@ -376,3 +377,7 @@ examples/            example configs
 ```
 
 How it works internally, and why: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## License
+
+[MIT](LICENSE) © 2026 Todd Hoffman

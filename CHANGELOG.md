@@ -2,7 +2,7 @@
 
 ## v0.1.0 — 2026-11-04
 
-First release.
+First release, under the MIT license.
 
 - OpenAI- and Anthropic-compatible proxy that routes requests by `model`,
   with SSE streaming.
