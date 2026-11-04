@@ -1,94 +1,378 @@
 # ai-swap
 
-One front door for local models spread across your machines. It is in the
-spirit of [llama-swap](https://github.com/mostlygeek/llama-swap), but built
-for the newer single-model engines:
+**One endpoint and one chat UI for all the local models on all your machines.**
 
-- **[Sushi](https://github.com/joshuaswarren/sushi)**: Apple Silicon, custom quants, SSD expert streaming
-- **[ds4 / DwarfStar4](https://github.com/antirez/ds4)**: DeepSeek V4 Flash on Metal, CUDA (DGX Spark) and ROCm (Strix Halo)
-- **[Strata](https://github.com/Niko1221/Strata)**: large MoE models on consumer GPUs, including the Radeon AI PRO R9700
-- **llama.cpp** (`llama-server`) and any other OpenAI-compatible server via `generic`
+ai-swap is a small Go program that sits in front of local inference engines.
+A client sends an OpenAI or Anthropic request naming a model. ai-swap then:
 
-You send an OpenAI or Anthropic request to any node. ai-swap starts the right
-engine on the right machine, evicting idle models when memory is short, and
-streams the answer back. A built-in chat UI shows every node's models and
-memory.
+1. finds which machine serves that model,
+2. starts the right engine there, unloading idle models first if memory is
+   short, and
+3. streams the answer back.
 
-```
-                 ┌──────────── mac (Apple Silicon) ─────────────┐
- clients ───────►│ ai-swap :8686 ──► sushi :12345 / ds4 :8000    │
- (chat UI,       │      │                                        │
-  Claude Code,   └──────┼────────────────────────────────────────┘
-  OpenAI SDKs)          │ peers: model not here? forward it
-                 ┌──────▼──── linux (R9700, 32 GB) ─────────────┐
-                 │ ai-swap :8686 ──► strata / llama-server :91xx │
-                 └───────────────────────────────────────────────┘
-```
+It is inspired by [llama-swap](https://github.com/mostlygeek/llama-swap) but
+built for the newer single-model engines and for running several machines as
+one pool.
 
-Every machine runs the same binary with its own config. Each node lists the
-others as `peers`, so you can point clients at whichever node is convenient.
+> **Status: v0.1.0, early.** The core works: routing, swapping, peers,
+> streaming and the chat UI, all covered by tests. The launch flags for Sushi
+> and Strata still need checking on real hardware. See [Known gaps](#known-gaps).
 
-## Quick start
+| Chat | Models across machines |
+|---|---|
+| ![Chat UI](docs/img/chat.png) | ![Models tab](docs/img/models.png) |
+
+---
+
+## Contents
+
+- [Why](#why)
+- [Features](#features)
+- [Supported engines](#supported-engines)
+- [Install](#install)
+- [Quick start (one machine)](#quick-start-one-machine)
+- [Several machines](#several-machines)
+- [Configuration reference](#configuration-reference)
+- [Using it](#using-it)
+- [HTTP API](#http-api)
+- [Running as a service](#running-as-a-service)
+- [Troubleshooting](#troubleshooting)
+- [Security](#security)
+- [Known gaps](#known-gaps)
+- [Development](#development)
+
+## Why
+
+llama-swap is great for one box running llama.cpp. The newer engines change
+the problem:
+
+- **Every engine is different.** Sushi, ds4 and Strata each have their own
+  binary, flags, model formats, default port and supported platforms.
+- **Models are huge.** A 64–128 GB model leaves room for little else, so
+  swapping has to be planned around memory rather than just "start what was
+  asked for".
+- **Engines are tied to hardware.** Sushi only runs on Apple Silicon. Strata
+  suits NVIDIA and AMD GPUs. ds4 targets Metal, DGX Spark and Strix Halo. So
+  your models end up spread over several machines, and you want one place to
+  reach them all.
+
+## Features
+
+- **OpenAI and Anthropic APIs** with streaming: `/v1/chat/completions`,
+  `/v1/completions`, `/v1/responses`, `/v1/embeddings`, `/v1/messages`.
+  Works with OpenAI SDKs, Open WebUI and Claude Code.
+- **Engine adapters** for Sushi, ds4, Strata and llama.cpp, plus `generic`
+  for any other OpenAI-compatible server (MLX, vLLM, SGLang, ...).
+- **Memory-aware swapping.** Each machine has a memory budget. Idle models
+  are unloaded least-recently-used first to make room. A model in the middle
+  of a reply is never killed; the swap waits for it.
+- **Several machines as one pool.** Every machine runs the same binary and
+  lists the others as peers. A request for a model on another machine is
+  forwarded there. `model@node` picks a specific machine.
+- **Idle timeout and crash recovery.** Models unload after a configurable
+  idle time. A model whose process dies is restarted on the next request.
+- **Built-in chat UI.** Streamed replies, a collapsible "thinking" section
+  for reasoning models, tokens/sec, a memory bar per machine, and
+  load/unload/log buttons for every model.
+- **Single static binary**, YAML config, no database.
+
+## Supported engines
+
+| Engine | `engine:` | Runs on | API | Adapter status |
+|---|---|---|---|---|
+| [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` | `llamacpp` | macOS, Linux (CUDA, ROCm, Vulkan, Metal) | OpenAI + Anthropic | Flags well known; ports assigned by ai-swap |
+| [Sushi](https://github.com/joshuaswarren/sushi) | `sushi` | macOS, Apple Silicon | OpenAI + Anthropic | Built from the README. Port flag unknown, so it uses fixed port 12345 |
+| [ds4 / DwarfStar4](https://github.com/antirez/ds4) | `ds4` | macOS (Metal), Linux (DGX Spark CUDA, Strix Halo ROCm) | OpenAI + Anthropic | Built from `docs/SERVER.md`. Port flag unknown, so it uses fixed port 8000 |
+| [Strata](https://github.com/Niko1221/Strata) | `strata` | NVIDIA, AMD (incl. Radeon AI PRO R9700), Apple Silicon | OpenAI + Anthropic | Needs `cmd:`, because `strata launch` is interactive. Fixed port 8080 unless your `cmd:` uses `${PORT}` |
+| Anything OpenAI-compatible | `generic` | anywhere | OpenAI | You supply `cmd:` |
+
+If an engine's flags differ from what the adapter expects, you can fix it in
+config (`bin`, `args`, `port_flag`, `host_flag`, or a full `cmd`) without
+changing code.
+
+## Install
+
+You need **Go 1.24 or newer** and **macOS or Linux**. Windows isn't supported
+yet, because ai-swap uses Unix process groups to stop engines cleanly.
 
 ```bash
-go build -o ai-swap ./cmd/ai-swap
+git clone https://github.com/hofftodd/ai-swap
 ```
 
 ```bash
-./ai-swap -config examples/mac.yaml -check   # validate + print launch commands
+cd ai-swap && go build -o ai-swap ./cmd/ai-swap
 ```
 
 ```bash
-./ai-swap -config examples/mac.yaml
+./ai-swap -version
 ```
 
-Open `http://<node>:8686/` for the chat UI, or point a client at it:
+To cross-compile for another machine, for example a DGX Spark (Linux, ARM):
+
+```bash
+GOOS=linux GOARCH=arm64 go build -o ai-swap-linux-arm64 ./cmd/ai-swap
+```
+
+## Quick start (one machine)
+
+Create `config.yaml`:
+
+```yaml
+node:
+  name: mac
+  listen: 127.0.0.1:8686
+  memory_budget_gb: 110      # leave headroom for the OS
+
+models:
+  qwen-flash-next:
+    engine: sushi
+    model: ~/.sushi/models/Qwen3.8-Flash-Next-Sushi-3bpw
+    ctx: 131072
+    memory_gb: 64
+    aliases: [qwen]
+```
+
+Check it. This prints the exact command each model would be started with:
+
+```bash
+./ai-swap -config config.yaml -check
+```
+
+Run it:
+
+```bash
+./ai-swap -config config.yaml
+```
+
+Open <http://127.0.0.1:8686/> and pick a model. The first request loads the
+model, which can take a minute or more for large models.
+
+## Several machines
+
+Run ai-swap on every machine. Each one lists the others under `peers`:
+
+```
+ clients ──► mac:8686 ─┬─► sushi  (Qwen3.8 Flash Next)      local
+                       ├─► ds4    (DeepSeek V4 Flash)       local
+                       └─► linux:8686 ─┬─► strata           R9700
+                                       └─► llama-server     R9700
+```
+
+```yaml
+# on the Mac
+peers:
+  - name: linux
+    url: http://linux.local:8686
+```
+
+```yaml
+# on the Linux box
+peers:
+  - name: mac
+    url: http://mac.local:8686
+```
+
+Each machine polls its peers every 10 seconds. `GET /v1/models` on any
+machine lists every machine's models. Full examples:
+
+- [`examples/mac.yaml`](examples/mac.yaml): Sushi + ds4 + an MLX model
+- [`examples/linux-r9700.yaml`](examples/linux-r9700.yaml): Strata + llama.cpp on a 32 GB Radeon AI PRO R9700
+
+Set `listen: 0.0.0.0:8686` so peers can reach each other, and read
+[Security](#security) first.
+
+**Where requests go:**
+- If this machine has the model (or an alias of it) and can run its engine
+  on this OS, the request is served here.
+- Otherwise it is forwarded to an online peer that has the model, preferring
+  one where the model is already loaded.
+- `name@node` forces a particular machine.
+- Forwarded requests carry an `X-AI-Swap-Hop` header and are never forwarded
+  again, so peers can't bounce a request back and forth.
+
+## Configuration reference
+
+```yaml
+node:
+  name: mac                  # default: hostname
+  listen: 127.0.0.1:8686     # default: 127.0.0.1:8686
+  memory_budget_gb: 110      # total for loaded models; 0 = no limit
+  port_range: [9100, 9199]   # ports handed to engines that accept a port flag
+
+peers:                       # other ai-swap machines
+  - name: linux
+    url: http://linux.local:8686
+
+defaults:
+  ttl: 30m                   # unload after this much idle time; 0 = never (default 0)
+  health_timeout: 10m        # max time to wait for a model to become ready (default 10m)
+
+engines:                     # per-machine install details, keyed by engine name
+  ds4:
+    bin: ~/src/ds4/ds4-server  # binary; defaults to the engine's usual name
+    dir: ~/src/ds4             # working directory
+    args: [--kv-disk-dir, ~/.ds4/kvcache]   # added to every model of this engine
+    env: {SOME_VAR: value}
+    port_flag: --port        # if set, ai-swap assigns ports instead of using the fixed one
+    host_flag: --host
+
+models:
+  deepseek-v4-flash:         # the name clients send as "model"
+    engine: ds4              # sushi | ds4 | strata | llamacpp | generic
+    model: ds4flash.gguf     # path or id passed to the engine's model flag
+    ctx: 65536               # context length; omitted = engine default
+    memory_gb: 100           # expected footprint, used for the budget
+    args: [--mtp]            # extra flags
+    env: {}                  # extra environment
+    aliases: [deepseek]      # extra names clients may use
+    ttl: 1h                  # overrides defaults.ttl
+    health_timeout: 15m      # overrides defaults.health_timeout
+    health_path: /v1/models  # readiness URL; engine default if omitted
+    port: 8000               # force a fixed port
+    upstream_model: ""       # rewrite "model" before sending to the engine
+    cmd: ""                  # replace the whole command; see below
+```
+
+**`cmd`** replaces the generated command line. It is split like a shell
+would split it (quotes and backslashes work), but no shell runs it. These
+placeholders are filled in: `${PORT}`, `${MODEL}`, `${CTX}`.
+
+```yaml
+  small-mlx:
+    engine: generic
+    cmd: mlx_lm.server --model mlx-community/Qwen3-4B-4bit --port ${PORT}
+    memory_gb: 4
+```
+
+`~` at the start of `model`, `bin`, `dir` and `args` entries expands to your
+home directory. Unknown keys are rejected, so a typo like `memroy_gb` fails
+loudly instead of being ignored.
+
+## Using it
+
+### Chat UI
+
+Open `http://<machine>:8686/`.
+- **Chat** tab: conversations are kept in your browser's local storage.
+- **Models** tab: every model on every machine, with its state and memory,
+  plus Load, Unload and Logs buttons.
+- Sidebar: memory use per machine.
+
+### curl / OpenAI SDKs
 
 ```bash
 curl http://mac.local:8686/v1/chat/completions \
-  -d '{"model":"qwen","stream":true,"messages":[{"role":"user","content":"hi"}]}'
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen","stream":true,"messages":[{"role":"user","content":"hello"}]}'
 ```
 
-For Claude Code or other Anthropic-API clients, set
-`ANTHROPIC_BASE_URL=http://mac.local:8686`. The Anthropic endpoint
-`/v1/messages` is routed the same way.
+```python
+from openai import OpenAI
+client = OpenAI(base_url="http://mac.local:8686/v1", api_key="unused")
+print(client.chat.completions.create(
+    model="deepseek",
+    messages=[{"role": "user", "content": "hello"}],
+).choices[0].message.content)
+```
 
-## Config
+### Claude Code and other Anthropic-API clients
 
-See [`examples/mac.yaml`](examples/mac.yaml) and
-[`examples/linux-r9700.yaml`](examples/linux-r9700.yaml). The main fields:
+```bash
+ANTHROPIC_BASE_URL=http://mac.local:8686 ANTHROPIC_MODEL=deepseek-v4-flash claude
+```
 
-| Field | Meaning |
+`/v1/messages` is routed the same way as OpenAI requests and passed straight
+to the engine. ai-swap does not translate between the two APIs, so the
+engine must support the Anthropic API itself. Sushi, ds4, Strata and recent
+llama.cpp all do.
+
+## HTTP API
+
+| Method & path | Description |
 |---|---|
-| `node.memory_budget_gb` | How much (V)RAM loaded models may use together. Models are evicted least-recently-used to stay under it. |
-| `peers[]` | Other ai-swap nodes. Requests for models this node doesn't have (or can't run on this OS) are forwarded. |
-| `models.<name>.engine` | `sushi`, `ds4`, `strata`, `llamacpp`, or `generic` |
-| `models.<name>.memory_gb` | Expected footprint while loaded |
-| `models.<name>.ttl` | Unload after this much idle time (`0` = never) |
-| `models.<name>.cmd` | Full command line override; `${PORT}`, `${MODEL}`, `${CTX}` are substituted |
-| `models.<name>.aliases` | Extra names clients can use |
-| `models.<name>.upstream_model` | Rewrites the `model` field sent to the backend |
-| `engines.<engine>.port_flag` | Teach ai-swap an engine's port flag so it can assign ports itself |
+| `POST /v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/embeddings` | OpenAI-compatible; routed by the body's `model` |
+| `POST /v1/messages`, `/v1/messages/count_tokens` | Anthropic-compatible; routed by `model` |
+| `GET /v1/models` | Every runnable model on this machine and online peers. Each entry has extra `node`, `status` and `engine` fields |
+| `GET /api/status` | This machine (version, OS, memory, model states) plus every peer's last known state |
+| `GET /api/node` | This machine only; peers poll this |
+| `POST /api/models/{name}/load` | Load a model now. `{name}` may be `model@node` |
+| `POST /api/models/{name}/unload` | Unload a model, even if a request is in progress |
+| `GET /api/models/{name}/logs` | Last 256 KB of the engine's stdout/stderr |
+| `GET /health` | Returns `ok` |
 
-Clients can pin a node with `model@node`, for example `coder@linux`.
+Errors use the OpenAI shape (`{"error":{...}}`), except on `/v1/messages*`,
+which use the Anthropic shape (`{"type":"error","error":{...}}`).
 
-## API
+## Running as a service
 
-| Endpoint | |
+**Linux (systemd)**: `/etc/systemd/system/ai-swap.service`:
+
+```ini
+[Unit]
+Description=ai-swap
+After=network-online.target
+
+[Service]
+User=you
+ExecStart=/usr/local/bin/ai-swap -config /etc/ai-swap/config.yaml
+Restart=on-failure
+KillMode=mixed
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
+```
+
+On SIGTERM, ai-swap stops every engine it started before exiting.
+
+**macOS**: run it from a terminal for now. A launchd plist is on the roadmap.
+
+## Troubleshooting
+
+| Symptom | What to check |
 |---|---|
-| `POST /v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/embeddings` | OpenAI-compatible, routed by `model` |
-| `POST /v1/messages`, `/v1/messages/count_tokens` | Anthropic-compatible, routed by `model` |
-| `GET /v1/models` | Models on this node and all online peers |
-| `GET /api/status` | Node, memory and model states, peers |
-| `POST /api/models/{name}/load` / `unload` | Manual control (`name@node` works) |
-| `GET /api/models/{name}/logs` | Last 256 KB of the engine's output |
+| Model stuck in `starting`, then `failed` | Models tab, then **Logs**. Usually a wrong `bin`/`model` path or a flag the engine doesn't accept. `-check` shows the exact command |
+| `address already in use` in the logs | Something else is on the engine's fixed port: Sushi 12345, ds4 8000, Strata 8080. Stop it, or set `port_flag` / `${PORT}` |
+| Request hangs for a long time | A swap may be waiting for a busy model to finish. A first load of a 100 GB model is also slow; raise `health_timeout` if it times out |
+| Mac becomes unresponsive or panics | `memory_budget_gb` is too high. Sushi's docs warn that over-committing wired memory can kernel-panic macOS; leave about 15% headroom |
+| Peer shows offline | Check `curl http://peer:8686/api/node` from this machine, and that the peer listens on `0.0.0.0` |
+| Streaming arrives in one chunk behind nginx | Set `proxy_buffering off;` for `/v1/` |
 
-## Status
+## Security
 
-This is an early skeleton. Engine flags for Sushi and Strata are not yet
-verified on real hardware; see [docs/architecture.md](docs/architecture.md)
-for the design, known gaps and roadmap.
+v0.1 has **no authentication**. Anyone who can reach the port can use your
+models and load or unload them. Keep `listen` on `127.0.0.1`, or only expose
+it on a trusted LAN or a private network such as Tailscale. A shared API key
+is the first item on the roadmap.
+
+## Known gaps
+
+- Port and host flags for Sushi and ds4, and a non-interactive server
+  command for Strata, are not confirmed yet. Until then, two models on the
+  same one of these engines are swapped rather than run side by side.
+- `memory_gb` is what you configure, not measured usage.
+- If a model is defined on two machines, the local one is preferred, rather
+  than whichever has free memory.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md#roadmap) for the full roadmap and
+[CHANGELOG.md](CHANGELOG.md) for release notes.
+
+## Development
 
 ```bash
 go test -race ./...
 ```
+
+```
+cmd/ai-swap/         entry point
+internal/config/     YAML schema, defaults, validation
+internal/engine/     engine adapters
+internal/process/    process start/stop, health checks, log buffer
+internal/scheduler/  load/evict/TTL decisions
+internal/cluster/    peer discovery and routing
+internal/server/     HTTP proxy, API, UI serving
+web/static/          chat UI (single HTML file, no build step)
+examples/            example configs
+```
+
+How it works internally, and why: [ARCHITECTURE.md](ARCHITECTURE.md).

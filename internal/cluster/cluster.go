@@ -24,6 +24,7 @@ const HopHeader = "X-AI-Swap-Hop"
 // NodeInfo is what each node publishes at /api/node.
 type NodeInfo struct {
 	Name           string             `json:"name"`
+	Version        string             `json:"version"`
 	OS             string             `json:"os"`
 	Arch           string             `json:"arch"`
 	MemoryBudgetGB float64            `json:"memory_budget_gb"`
@@ -125,6 +126,22 @@ func (c *Cluster) fetch(ctx context.Context, p *PeerState) (*NodeInfo, error) {
 		return nil, err
 	}
 	return &info, nil
+}
+
+// Refresh re-polls the peer at base in the background, so state changes
+// caused by a forwarded request (a model loading or unloading) show up
+// without waiting for the next poll interval.
+func (c *Cluster) Refresh(base *url.URL) {
+	for _, p := range c.peers {
+		if p.parsed.String() == base.String() {
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				c.poll(ctx, p)
+			}()
+			return
+		}
+	}
 }
 
 // Peers returns a copy of every peer's state.

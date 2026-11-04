@@ -166,6 +166,16 @@ func TestPeerRouting(t *testing.T) {
 		t.Fatalf("forward failed: %d %v", code, out)
 	}
 
+	// The forward triggers an immediate re-poll, so mac sees coder as ready
+	// well before the hour-long poll interval used in tests.
+	deadline := time.Now().Add(2 * time.Second)
+	for !peerModelReady(t, mac.url, "coder") {
+		if time.Now().After(deadline) {
+			t.Fatal("peer state not refreshed after forwarding")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
 	// model@node pins a node.
 	code, out = post(t, mac.url+"/v1/chat/completions", `{"model":"coder@linux"}`)
 	if code != 200 || out["model"] != "coder" {
@@ -189,6 +199,25 @@ func TestPeerRouting(t *testing.T) {
 	if got["qwen"] != "mac" || got["coder"] != "peer0" {
 		t.Fatalf("models list: %v", got)
 	}
+}
+
+func peerModelReady(t *testing.T, base, id string) bool {
+	t.Helper()
+	resp, err := http.Get(base + "/v1/models")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var list struct {
+		Data []modelEntry `json:"data"`
+	}
+	json.NewDecoder(resp.Body).Decode(&list)
+	for _, m := range list.Data {
+		if m.ID == id {
+			return m.Status == scheduler.Ready
+		}
+	}
+	return false
 }
 
 func TestUnknownModelErrorShapes(t *testing.T) {

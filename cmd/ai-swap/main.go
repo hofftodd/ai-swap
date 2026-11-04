@@ -18,6 +18,7 @@ import (
 	"github.com/hofftodd/ai-swap/internal/config"
 	"github.com/hofftodd/ai-swap/internal/scheduler"
 	"github.com/hofftodd/ai-swap/internal/server"
+	"github.com/hofftodd/ai-swap/internal/version"
 	"github.com/hofftodd/ai-swap/web"
 )
 
@@ -25,7 +26,12 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	listen := flag.String("listen", "", "override node.listen")
 	check := flag.Bool("check", false, "validate the config, print launch commands, and exit")
+	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+	if *showVersion {
+		fmt.Println("ai-swap", version.Version)
+		return
+	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 	if err := run(*cfgPath, *listen, *check, log); err != nil {
@@ -67,7 +73,7 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 	}
 	errc := make(chan error, 1)
 	go func() {
-		log.Info("ai-swap listening", "addr", cfg.Node.Listen, "node", cfg.Node.Name,
+		log.Info("ai-swap listening", "version", version.Version, "addr", cfg.Node.Listen, "node", cfg.Node.Name,
 			"models", len(cfg.Models), "peers", len(cfg.Peers))
 		errc <- srv.ListenAndServe()
 	}()

@@ -103,7 +103,7 @@ th { color: var(--muted); font-weight: 500; }
 <body>
 <aside>
   <header>
-    <h1>ai-swap</h1>
+    <h1>ai-swap <span id="ver" style="font-weight:400;font-size:12px;color:var(--muted)"></span></h1>
     <button class="small" id="newChat">New chat</button>
   </header>
   <div id="chats"></div>
@@ -291,6 +291,7 @@ async function refresh() {
     const [mr, sr] = await Promise.all([fetch("/v1/models"), fetch("/api/status")]);
     models = (await mr.json()).data;
     status = await sr.json();
+    $("ver").textContent = status.node.version ? "v" + status.node.version : "";
     renderModelSelect(); renderNodes(); renderModelTable();
   } catch (e) { /* server restarting; try again next tick */ }
 }

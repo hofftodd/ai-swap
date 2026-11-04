@@ -22,6 +22,7 @@ import (
 	"github.com/hofftodd/ai-swap/internal/cluster"
 	"github.com/hofftodd/ai-swap/internal/config"
 	"github.com/hofftodd/ai-swap/internal/scheduler"
+	"github.com/hofftodd/ai-swap/internal/version"
 )
 
 const maxBody = 64 << 20
@@ -127,6 +128,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 			body = rewriteModel(body, rt.remote)
 		}
 		s.proxy(w, r, body, rt.peer, true)
+		s.cluster.Refresh(rt.peer)
 		return
 	}
 
@@ -235,7 +237,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) nodeInfo() cluster.NodeInfo {
 	return cluster.NodeInfo{
-		Name: s.cfg.Node.Name, OS: runtime.GOOS, Arch: runtime.GOARCH,
+		Name: s.cfg.Node.Name, Version: version.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		MemoryBudgetGB: s.cfg.Node.MemoryBudgetGB,
 		MemoryUsedGB:   s.mgr.UsedGB(),
 		Models:         s.mgr.Snapshot(),
@@ -271,6 +273,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, action string) {
 	if rt.peer != nil {
 		r.URL.Path = "/api/models/" + url.PathEscape(rt.remote) + "/" + action
 		s.proxy(w, r, nil, rt.peer, true)
+		s.cluster.Refresh(rt.peer)
 		return
 	}
 	var err error
