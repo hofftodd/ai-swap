@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -96,6 +97,9 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 
 func printPlan(cfg *config.Config, mgr *scheduler.Manager) error {
 	fmt.Printf("node %q listen %s budget %.0f GB\n", cfg.Node.Name, cfg.Node.Listen, cfg.Node.MemoryBudgetGB)
+	if len(cfg.Node.Resident) > 0 {
+		fmt.Printf("resident: %s\n", strings.Join(cfg.Node.Resident, ", "))
+	}
 	next := cfg.Node.PortRange[0]
 	alloc := func() (int, error) { next++; return next - 1, nil }
 	for _, name := range cfg.ModelNames() {
@@ -106,6 +110,9 @@ func printPlan(cfg *config.Config, mgr *scheduler.Manager) error {
 			continue
 		}
 		note := ""
+		if cfg.IsResident(name) {
+			note = " (resident)"
+		}
 		if !inst.Engine.Supported() {
 			note = " (not runnable on this OS; will route to a peer)"
 		}

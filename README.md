@@ -199,6 +199,7 @@ node:
   listen: 127.0.0.1:8686     # default: 127.0.0.1:8686
   memory_budget_gb: 110      # total for loaded models; 0 = no limit
   port_range: [9100, 9199]   # ports handed to engines that accept a port flag
+  resident: [qwen-flash-next] # loaded at startup and kept loaded by default (see below)
 
 peers:                       # other ai-swap machines
   - name: linux
@@ -234,6 +235,21 @@ models:
     cmd: ""                  # replace the whole command; see below
 ```
 
+**`resident`** names the models a node keeps loaded by default, such as
+the one your coding agents use most. A resident model:
+
+- is loaded when ai-swap starts,
+- is never unloaded for being idle (its `ttl` is ignored),
+- still gives way when another model needs the memory: it is evicted like
+  any idle model, least recently used first, and
+- comes back by itself once there is room again, for example after the
+  swapped-in model's `ttl` expires. A reload never evicts another model,
+  and waits behind any request that is queued for a swap.
+
+Unloading a resident model by hand (Models tab or `/unload`) keeps it
+unloaded until something loads it again. Together, residents must fit in
+`memory_budget_gb`.
+
 **`cmd`** replaces the generated command line. It is split like a shell
 would split it (quotes and backslashes work), but no shell runs it. These
 placeholders are filled in: `${PORT}`, `${MODEL}`, `${CTX}`.
@@ -257,7 +273,15 @@ Open `http://<machine>:8686/`.
 - **Chat** tab: conversations are kept in your browser's local storage.
 - **Models** tab: every model on every machine, with its state and memory,
   plus Load, Unload and Logs buttons.
-- Sidebar: memory use per machine.
+- Left sidebar: every model, grouped by machine (click one to switch),
+  your chats, and memory use per machine.
+- Right pane (**Stats**): live numbers for the selected model. Generation
+  and prompt tok/s, time to first token, speculative-decoding acceptance and
+  token counts are measured by ai-swap on every request, so they work with
+  any engine; llama.cpp also reports its own timings, which are preferred.
+  When the model is loaded, the pane adds what the engine knows: parameters,
+  quantization, weights size, context, slots, KV cache, plus the engine
+  process's resident memory and, on Linux with AMD GPUs, VRAM/GTT use.
 
 ### curl / OpenAI SDKs
 
@@ -299,6 +323,7 @@ llama.cpp all do.
 | `POST /api/models/{name}/load` | Load a model now. `{name}` may be `model@node` |
 | `POST /api/models/{name}/unload` | Unload a model, even if a request is in progress |
 | `GET /api/models/{name}/logs` | Last 256 KB of the engine's stdout/stderr |
+| `GET /api/models/{name}/stats` | Live stats for the UI's stats pane: state, load time, process memory, GPU memory (Linux/AMD), what the engine reports about the model (parameters, quantization, context, slots, metrics), and request stats measured by ai-swap (tok/s, time to first token, tokens, draft acceptance) |
 | `GET /health` | Returns `ok` |
 
 Errors use the OpenAI shape (`{"error":{...}}`), except on `/v1/messages*`,

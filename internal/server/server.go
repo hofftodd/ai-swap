@@ -22,6 +22,7 @@ import (
 	"github.com/hofftodd/ai-swap/internal/cluster"
 	"github.com/hofftodd/ai-swap/internal/config"
 	"github.com/hofftodd/ai-swap/internal/scheduler"
+	"github.com/hofftodd/ai-swap/internal/stats"
 	"github.com/hofftodd/ai-swap/internal/version"
 )
 
@@ -45,13 +46,14 @@ type Server struct {
 	log       *slog.Logger
 	transport http.RoundTripper
 	ui        fs.FS
+	stats     *stats.Recorder
 }
 
 // New builds the server. ui may be nil.
 func New(cfg *config.Config, mgr *scheduler.Manager, cl *cluster.Cluster, ui fs.FS, log *slog.Logger) *Server {
 	t := http.DefaultTransport.(*http.Transport).Clone()
 	t.ResponseHeaderTimeout = 0 // prefill on huge prompts can take minutes
-	return &Server{cfg: cfg, mgr: mgr, cluster: cl, log: log, transport: t, ui: ui}
+	return &Server{cfg: cfg, mgr: mgr, cluster: cl, log: log, transport: t, ui: ui, stats: stats.NewRecorder()}
 }
 
 // Handler returns the root HTTP handler.
@@ -67,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/models/{name}/load", s.handleLoad)
 	mux.HandleFunc("POST /api/models/{name}/unload", s.handleUnload)
 	mux.HandleFunc("GET /api/models/{name}/logs", s.handleLogs)
+	mux.HandleFunc("GET /api/models/{name}/stats", s.handleStats)
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}
@@ -106,7 +109,8 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var head struct {
-		Model string `json:"model"`
+		Model  string `json:"model"`
+		Stream bool   `json:"stream"`
 	}
 	if err := json.Unmarshal(body, &head); err != nil {
 		s.apiError(w, r, http.StatusBadRequest, "invalid_request_error", "body must be JSON: "+err.Error())
@@ -132,6 +136,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	start := time.Now()
 	port, release, err := s.mgr.Acquire(r.Context(), rt.local)
 	if err != nil {
 		code := http.StatusServiceUnavailable
@@ -150,7 +155,13 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 	case head.Model != rt.local:
 		body = rewriteModel(body, rt.local)
 	}
-	s.proxy(w, r, body, &url.URL{Scheme: "http", Host: "127.0.0.1:" + strconv.Itoa(port)}, false)
+	// Time to first token is measured from when the model is ready, so a
+	// cold load doesn't swamp the figure (load time is reported separately).
+	mw := &meter{ResponseWriter: w, start: time.Now(), code: http.StatusOK}
+	s.proxy(mw, r, body, &url.URL{Scheme: "http", Host: "127.0.0.1:" + strconv.Itoa(port)}, false)
+	if r.URL.Path != "/v1/messages/count_tokens" {
+		s.stats.Observe(rt.local, mw.sample(r.URL.Path, head.Stream, start))
+	}
 }
 
 func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte, target *url.URL, hop bool) {
@@ -357,4 +368,117 @@ func (s *Server) logRequests(h http.Handler) http.Handler {
 			"status", rec.code, "dur", time.Since(start).Round(time.Millisecond),
 			"forwarded", r.Header.Get(cluster.HopHeader) != "")
 	})
+}
+
+// meter wraps a ResponseWriter to time the response and keep its tail, from
+// which token usage and backend timings are parsed afterwards.
+type meter struct {
+	http.ResponseWriter
+	start, first, last time.Time
+	code               int
+	tail               []byte
+}
+
+const meterTail = 32 << 10
+
+func (m *meter) WriteHeader(code int) {
+	m.code = code
+	m.ResponseWriter.WriteHeader(code)
+}
+
+func (m *meter) Write(b []byte) (int, error) {
+	now := time.Now()
+	if m.first.IsZero() && len(b) > 0 {
+		m.first = now
+	}
+	m.last = now
+	m.tail = append(m.tail, b...)
+	if len(m.tail) > meterTail {
+		m.tail = append(m.tail[:0], m.tail[len(m.tail)-meterTail:]...)
+	}
+	return m.ResponseWriter.Write(b)
+}
+
+func (m *meter) Flush() {
+	if f, ok := m.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (m *meter) Unwrap() http.ResponseWriter { return m.ResponseWriter }
+
+func (m *meter) sample(path string, stream bool, requested time.Time) stats.Sample {
+	s := stats.Sample{At: requested, Path: path, Stream: stream, Status: m.code}
+	if m.first.IsZero() {
+		return s
+	}
+	s.TTFTSeconds = m.first.Sub(m.start).Seconds()
+	s.TotalSeconds = m.last.Sub(requested).Seconds()
+	if m.code < 400 {
+		stats.ParseUsage(m.tail, &s)
+		// No backend timings: estimate from the streaming window.
+		if s.GenTPS == 0 && stream && s.CompletionTokens > 1 {
+			if d := m.last.Sub(m.first).Seconds(); d > 0 {
+				s.GenTPS, s.GenTPSSource = float64(s.CompletionTokens-1)/d, "measured"
+			}
+		}
+	}
+	return s
+}
+
+// modelStats is the payload of GET /api/models/{name}/stats.
+type modelStats struct {
+	Node     string           `json:"node"`
+	Status   scheduler.Status `json:"status"`
+	Config   modelConfig      `json:"config"`
+	RSSBytes int64            `json:"rss_bytes,omitempty"`
+	Backend  *stats.Backend   `json:"backend,omitempty"`
+	GPUs     []stats.GPU      `json:"gpus,omitempty"`
+	Requests stats.Summary    `json:"requests"`
+}
+
+type modelConfig struct {
+	Model      string   `json:"model,omitempty"`
+	Ctx        int      `json:"ctx,omitempty"`
+	MemoryGB   float64  `json:"memory_gb"`
+	TTLSeconds float64  `json:"ttl_seconds"`
+	Args       []string `json:"args,omitempty"`
+	BudgetGB   float64  `json:"node_budget_gb"`
+	NodeUsedGB float64  `json:"node_used_gb"`
+}
+
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	rt, ok := s.resolve(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown model"})
+		return
+	}
+	if rt.peer != nil {
+		r.URL.Path = "/api/models/" + url.PathEscape(rt.remote) + "/stats"
+		s.proxy(w, r, nil, rt.peer, true)
+		return
+	}
+	m := s.cfg.Models[rt.local]
+	out := modelStats{
+		Node: s.cfg.Node.Name,
+		Config: modelConfig{
+			Model: m.Model, Ctx: m.Ctx, MemoryGB: m.MemoryGB, Args: m.Args,
+			TTLSeconds: m.TTL.D().Seconds(), BudgetGB: s.cfg.Node.MemoryBudgetGB, NodeUsedGB: s.mgr.UsedGB(),
+		},
+		GPUs:     stats.GPUs(),
+		Requests: s.stats.Summary(rt.local),
+	}
+	if out.Config.Model == "" && m.Cmd != "" {
+		out.Config.Model = m.Cmd
+	}
+	for _, st := range s.mgr.Snapshot() {
+		if st.Name == rt.local {
+			out.Status = st
+		}
+	}
+	if out.Status.State == scheduler.Ready {
+		out.RSSBytes = stats.RSSBytes(out.Status.PID)
+		out.Backend = stats.ProbeBackend(r.Context(), out.Status.Engine, out.Status.Port)
+	}
+	writeJSON(w, http.StatusOK, out)
 }

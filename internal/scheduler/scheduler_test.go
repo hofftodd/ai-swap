@@ -225,3 +225,96 @@ func TestCrashDetected(t *testing.T) {
 		rel()
 	}
 }
+
+// One-at-a-time card: r is resident, x is swapped in on demand.
+const residentCfg = `
+node: {memory_budget_gb: 100, resident: [r]}
+defaults: {ttl: 1m}
+models:
+  r: {engine: generic, cmd: "r --port ${PORT}", memory_gb: 80}
+  x: {engine: generic, cmd: "x --port ${PORT}", memory_gb: 80}
+`
+
+func TestResidentLifecycle(t *testing.T) {
+	m, r := newTestManager(t, residentCfg)
+	ctx := context.Background()
+
+	// Loaded at startup.
+	m.restoreResidents()
+	if s := states(m); s["r"] != Ready {
+		t.Fatalf("resident not preloaded: %v", s)
+	}
+
+	// Never unloaded for idleness.
+	m.reapOnce(time.Now().Add(time.Hour))
+	if s := states(m); s["r"] != Ready {
+		t.Fatalf("resident reaped by TTL: %v", s)
+	}
+
+	// Gives way when another model needs the memory.
+	_, rel, err := m.Acquire(ctx, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s := states(m); s["r"] != Stopped || s["x"] != Ready {
+		t.Fatalf("resident should be evicted for x: %v", s)
+	}
+
+	// Not restored while x is loaded (that would evict x).
+	m.restoreResidents()
+	if s := states(m); s["r"] != Stopped || s["x"] != Ready {
+		t.Fatalf("restore must not evict x: %v", s)
+	}
+	rel()
+
+	// x idles out, then the resident comes back.
+	m.reapOnce(time.Now().Add(2 * time.Minute))
+	m.restoreResidents()
+	if s := states(m); s["r"] != Ready || s["x"] != Stopped {
+		t.Fatalf("resident should be restored after x unloads: %v", s)
+	}
+	if want := []string{"r", "x", "r"}; len(r.started) != 3 || r.started[2] != "r" {
+		t.Fatalf("starts = %v, want %v", r.started, want)
+	}
+}
+
+func TestResidentHeldAfterManualUnload(t *testing.T) {
+	m, _ := newTestManager(t, residentCfg)
+	ctx := context.Background()
+	m.restoreResidents()
+
+	if err := m.Unload(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	m.restoreResidents()
+	if s := states(m); s["r"] != Stopped {
+		t.Fatalf("manually unloaded resident came back: %v", s)
+	}
+
+	// Loading it again clears the hold, so later evictions restore it.
+	if err := m.Load(ctx, "r"); err != nil {
+		t.Fatal(err)
+	}
+	_, rel, err := m.Acquire(ctx, "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel()
+	if err := m.Unload(ctx, "x"); err != nil {
+		t.Fatal(err)
+	}
+	m.restoreResidents()
+	if s := states(m); s["r"] != Ready {
+		t.Fatalf("resident should be restored once the hold is cleared: %v", s)
+	}
+}
+
+func TestResidentRestoreYieldsToQueuedClient(t *testing.T) {
+	m, r := newTestManager(t, residentCfg)
+	m.waiting.Add(1) // a client is queued for the lifecycle lock
+	m.restoreResidents()
+	m.waiting.Add(-1)
+	if len(r.started) != 0 {
+		t.Fatalf("restore ran ahead of a queued client: %v", r.started)
+	}
+}

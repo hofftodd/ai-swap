@@ -33,6 +33,11 @@ type Node struct {
 	MemoryBudgetGB float64 `yaml:"memory_budget_gb"`
 	// PortRange is the range of ports handed to engines that accept a port flag.
 	PortRange [2]int `yaml:"port_range"`
+	// Resident lists the models this node keeps loaded by default. They are
+	// loaded at startup and never unloaded for being idle, but they can be
+	// evicted (least-recently-used first) when another model needs the
+	// memory; they come back once there is room again.
+	Resident []string `yaml:"resident"`
 }
 
 // Peer is another ai-swap node whose models this node can route to.
@@ -218,6 +223,26 @@ func (c *Config) validate() error {
 			seen[n] = name
 		}
 	}
+	var residentGB float64
+	seenResident := map[string]bool{}
+	for i, r := range c.Node.Resident {
+		m, ok := c.Resolve(r)
+		if !ok {
+			errs = append(errs, fmt.Sprintf("node.resident: unknown model %q", r))
+			continue
+		}
+		c.Node.Resident[i] = m.Name // canonicalise aliases
+		if seenResident[m.Name] {
+			errs = append(errs, fmt.Sprintf("node.resident: %q listed twice", r))
+			continue
+		}
+		seenResident[m.Name] = true
+		residentGB += m.MemoryGB
+	}
+	if c.Node.MemoryBudgetGB > 0 && residentGB > c.Node.MemoryBudgetGB {
+		errs = append(errs, fmt.Sprintf("node.resident: models need %.0f GB together, over the node budget %.0f",
+			residentGB, c.Node.MemoryBudgetGB))
+	}
 	for _, p := range c.Peers {
 		if p.Name == "" || p.URL == "" {
 			errs = append(errs, "peers need both name and url")
@@ -237,6 +262,16 @@ func (c *Config) ModelNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// IsResident reports whether the named model is one of this node's residents.
+func (c *Config) IsResident(name string) bool {
+	for _, r := range c.Node.Resident {
+		if r == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Resolve maps a requested name or alias to a local model.

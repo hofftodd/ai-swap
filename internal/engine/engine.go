@@ -149,6 +149,14 @@ func init() {
 		caps:      Caps{OpenAI: true, Anthropic: true},
 		modelFlag: "-m", ctxFlag: "-c", portFlag: "--port", hostFlag: "--host",
 		healthPath: "/health",
+		// --metrics enables the Prometheus endpoint the stats pane reads
+		// (KV-cache use, token counters). Harmless if already given.
+		extra: func(m *config.Model, ec config.EngineConfig) []string {
+			if slices.Contains(m.Args, "--metrics") || slices.Contains(ec.Args, "--metrics") {
+				return nil
+			}
+			return []string{"--metrics"}
+		},
 	})
 
 	// Sushi: Apple Silicon only. Its docs show `sushi serve --model DIR

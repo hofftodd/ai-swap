@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/hofftodd/ai-swap/internal/config"
@@ -58,6 +59,13 @@ type Instance struct {
 	inflight int
 	lastUsed time.Time
 	lastErr  string
+	// held is set when a resident model was unloaded by hand; it is not
+	// brought back automatically until something loads it again.
+	held bool
+	// loadedAt and loadDur describe the current (or last) successful start.
+	loadedAt time.Time
+	loadDur  time.Duration
+	pid      int
 }
 
 // Status is a snapshot of an instance for the API/UI.
@@ -73,7 +81,15 @@ type Status struct {
 	Aliases  []string    `json:"aliases,omitempty"`
 	Caps     engine.Caps `json:"caps"`
 	Runnable bool        `json:"runnable"`
+	Resident bool        `json:"resident,omitempty"`
+	// LoadedAt is when the model became ready; LoadSeconds is how long that took.
+	LoadedAt    *time.Time `json:"loaded_at,omitempty"`
+	LoadSeconds float64    `json:"load_seconds,omitempty"`
+	PID         int        `json:"pid,omitempty"`
 }
+
+// pider is implemented by handles that know their OS process ID.
+type pider interface{ PID() int }
 
 // Manager owns all model instances on this node.
 type Manager struct {
@@ -88,6 +104,9 @@ type Manager struct {
 	// lifecycle serialises every start/stop so the memory plan is never
 	// computed against a half-applied previous plan.
 	lifecycle chan struct{}
+	// waiting counts callers queued for the lifecycle lock, so background
+	// resident restores never jump ahead of a client's swap.
+	waiting atomic.Int32
 }
 
 // New builds a manager for the models in cfg.
@@ -210,6 +229,9 @@ func (m *Manager) Unload(ctx context.Context, name string) error {
 		return err
 	}
 	defer m.unlock()
+	m.mu.Lock()
+	inst.held = m.cfg.IsResident(name)
+	m.mu.Unlock()
 	m.stop(inst)
 	return nil
 }
@@ -226,8 +248,10 @@ func (m *Manager) StopAll() {
 	wg.Wait()
 }
 
-// RunReaper unloads idle models past their TTL until ctx is done.
+// RunReaper loads resident models, then until ctx is done unloads idle
+// models past their TTL and brings evicted residents back when they fit.
 func (m *Manager) RunReaper(ctx context.Context, every time.Duration) {
+	m.restoreResidents()
 	t := time.NewTicker(every)
 	defer t.Stop()
 	for {
@@ -236,7 +260,39 @@ func (m *Manager) RunReaper(ctx context.Context, every time.Duration) {
 			return
 		case <-t.C:
 			m.reapOnce(time.Now())
+			if ctx.Err() == nil {
+				m.restoreResidents()
+			}
 		}
+	}
+}
+
+// restoreResidents starts any stopped resident model that fits in memory
+// without evicting anything. It never waits: if a swap is in progress or a
+// client is queued for one, it tries again on the next tick.
+func (m *Manager) restoreResidents() {
+	for _, name := range m.cfg.Node.Resident {
+		if m.waiting.Load() > 0 {
+			return
+		}
+		select {
+		case m.lifecycle <- struct{}{}:
+		default:
+			return
+		}
+		inst := m.instances[name]
+		m.mu.Lock()
+		start := inst.state == Stopped && !inst.held && inst.Engine.Supported()
+		if start {
+			victims, wait := m.planLocked(inst)
+			start = len(victims) == 0 && !wait
+		}
+		m.mu.Unlock()
+		if start {
+			m.log.Info("loading resident model", "model", name)
+			_ = m.startLocked(inst) // failures are logged and leave it Failed
+		}
+		m.unlock()
 	}
 }
 
@@ -251,6 +307,9 @@ func (m *Manager) reapOnce(now time.Time) {
 	m.mu.Lock()
 	for _, inst := range m.instances {
 		ttl := inst.Model.TTL.D()
+		if m.cfg.IsResident(inst.Model.Name) {
+			continue // residents give way to memory pressure, not idleness
+		}
 		if inst.state == Ready && inst.inflight == 0 && ttl > 0 && now.Sub(inst.lastUsed) > ttl {
 			expired = append(expired, inst)
 		}
@@ -274,9 +333,18 @@ func (m *Manager) Snapshot() []Status {
 			MemoryGB: inst.Model.MemoryGB, Inflight: inst.inflight,
 			Error: inst.lastErr, Aliases: inst.Model.Aliases,
 			Caps: inst.Engine.Caps(), Runnable: inst.Engine.Supported(),
+			Resident: m.cfg.IsResident(name),
 		}
 		if inst.state == Ready || inst.state == Starting {
 			s.Port = inst.port
+			s.PID = inst.pid
+		}
+		if inst.state == Ready && !inst.loadedAt.IsZero() {
+			t := inst.loadedAt
+			s.LoadedAt = &t
+		}
+		if inst.loadDur > 0 {
+			s.LoadSeconds = inst.loadDur.Seconds()
 		}
 		if !inst.lastUsed.IsZero() {
 			t := inst.lastUsed
@@ -301,6 +369,8 @@ func (m *Manager) UsedGB() float64 {
 }
 
 func (m *Manager) lock(ctx context.Context) error {
+	m.waiting.Add(1)
+	defer m.waiting.Add(-1)
 	select {
 	case m.lifecycle <- struct{}{}:
 		return nil
@@ -416,11 +486,17 @@ func (m *Manager) startLocked(inst *Instance) error {
 	m.mu.Unlock()
 
 	m.log.Info("starting", "model", name, "engine", inst.Engine.Name(), "port", l.Port)
+	t0 := time.Now()
 	h, err := m.start(l, inst.Logs)
 	if err != nil {
 		err = fmt.Errorf("start %s: %w", name, err)
 		m.fail(inst, err)
 		return err
+	}
+	if p, ok := h.(pider); ok {
+		m.mu.Lock()
+		inst.pid = p.PID()
+		m.mu.Unlock()
 	}
 	// Loading is not tied to the request context: a client giving up after
 	// a minute should not throw away a nearly-loaded 100 GB model.
@@ -432,7 +508,8 @@ func (m *Manager) startLocked(inst *Instance) error {
 	}
 
 	m.mu.Lock()
-	inst.handle, inst.state, inst.lastUsed = h, Ready, time.Now()
+	inst.handle, inst.state, inst.lastUsed, inst.held = h, Ready, time.Now(), false
+	inst.loadedAt, inst.loadDur = time.Now(), time.Since(t0)
 	m.notifyLocked()
 	m.mu.Unlock()
 	m.log.Info("ready", "model", name, "port", l.Port)
@@ -476,7 +553,7 @@ func (m *Manager) stop(inst *Instance) {
 	h.Stop(stopGrace)
 
 	m.mu.Lock()
-	inst.state, inst.handle = Stopped, nil
+	inst.state, inst.handle, inst.pid = Stopped, nil, 0
 	m.notifyLocked()
 	m.mu.Unlock()
 }

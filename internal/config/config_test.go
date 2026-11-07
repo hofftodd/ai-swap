@@ -82,3 +82,33 @@ func TestExampleConfigsParse(t *testing.T) {
 		}
 	}
 }
+
+func TestResident(t *testing.T) {
+	c, err := Parse([]byte(`
+node: {memory_budget_gb: 100, resident: [alpha]}
+models:
+  a: {engine: llamacpp, model: /m/a.gguf, memory_gb: 40, aliases: [alpha]}
+  b: {engine: llamacpp, model: /m/b.gguf, memory_gb: 40}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.IsResident("a") || c.IsResident("b") {
+		t.Fatalf("alias should resolve to a: %v", c.Node.Resident)
+	}
+
+	for yaml, want := range map[string]string{
+		`{memory_budget_gb: 100, resident: [nope]}`: `unknown model "nope"`,
+		`{memory_budget_gb: 100, resident: [a, a]}`: "listed twice",
+		`{memory_budget_gb: 70, resident: [a, b]}`:  "over the node budget",
+	} {
+		_, err := Parse([]byte("node: " + yaml + `
+models:
+  a: {engine: llamacpp, model: /m/a.gguf, memory_gb: 40}
+  b: {engine: llamacpp, model: /m/b.gguf, memory_gb: 40}
+`))
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: got %v, want %q", yaml, err, want)
+		}
+	}
+}

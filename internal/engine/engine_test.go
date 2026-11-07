@@ -21,7 +21,7 @@ func TestBuildCommands(t *testing.T) {
 		{
 			engine:   "llamacpp",
 			model:    config.Model{Name: "q", Model: "/m/q.gguf", Ctx: 8192, Args: []string{"-ngl", "99"}},
-			wantArgv: []string{"llama-server", "-m", "/m/q.gguf", "-c", "8192", "--host", "127.0.0.1", "--port", "9100", "-ngl", "99"},
+			wantArgv: []string{"llama-server", "-m", "/m/q.gguf", "-c", "8192", "--host", "127.0.0.1", "--port", "9100", "--metrics", "-ngl", "99"},
 			wantPort: 9100,
 		},
 		{
