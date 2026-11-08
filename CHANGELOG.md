@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Reservations: `POST /api/lock` hands this machine to one client (e.g. a
+  benchmark run) and returns a token. Until it's released (`DELETE
+  /api/lock`) or lapses unrenewed (`ttl_seconds`, default 300), only
+  requests carrying `X-AI-Swap-Lock: <token>` are served or may load and
+  unload models here; others get 503 with Retry-After naming the holder.
+  Idle unloads and resident reloads pause meanwhile, and releasing brings
+  back the residents the holder unloaded. Shown in `/api/node` and the UI
+  ("reserved", with a Release button); `?node=<peer>` releases a peer's.
+
 - llama-swap compatibility: `GET /running`, `GET|POST /unload` (also
   `POST /api/unload`) and `GET /upstream/{model}/{path...}` for this
   machine's models, so tools written for llama-swap (benchmark harnesses,

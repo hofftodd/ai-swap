@@ -311,6 +311,19 @@ step, embedded with `go:embed`.
   to the server except as the messages of a request.
 - Light and dark themes follow the OS setting.
 
+## Reservations
+
+`lock.go`. A reservation is one token per machine, held in the server (not
+the scheduler), with an owner, a reason and an expiry. Every local entry point
+(inference, load/unload, `/unload`, `/upstream`) passes through `lockGate`:
+without a reservation everything is allowed; with one, only requests carrying
+the token are, and each of those renews the expiry and counts as in flight,
+so a single 20-minute request can't let the reservation lapse under it.
+Taking a reservation pauses the scheduler's reaper (idle unloads, resident
+reloads); releasing it, or its lapsing, resumes them and clears the
+"unloaded by hand" mark on residents, so they come back. The reservation is
+published in `/api/node`, so peers, the UI and Foreman can see it.
+
 ## Concurrency model
 
 | Shared state | Protected by |

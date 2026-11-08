@@ -345,10 +345,34 @@ llama.cpp all do.
 | `GET /api/models/{name}/stats` | Live stats for the UI's stats pane: state, load time, process memory, GPU memory (Linux/AMD), what the engine reports about the model (parameters, quantization, context, slots, metrics), and request stats measured by ai-swap (tok/s, time to first token, tokens, draft acceptance) |
 | `GET /health` | Returns `ok` |
 | `POST /api/unload` | Unload every model on this machine (residents stay unloaded until used) |
+| `GET`/`POST`/`DELETE /api/lock` | Reserve this machine for one client, e.g. a benchmark run (see [Reservations](#reservations)) |
 | `GET /running`, `GET\|POST /unload`, `GET /upstream/{model}/{path...}` | llama-swap compatibility for this machine's models: loaded models, unload all, and a GET passed straight to a model's engine (e.g. llama.cpp's `/props`) |
 
 Errors use the OpenAI shape (`{"error":{...}}`), except on `/v1/messages*`,
 which use the Anthropic shape (`{"type":"error","error":{...}}`).
+
+## Reservations
+
+A client that needs a machine to itself, such as a benchmark run, can reserve
+it:
+
+```bash
+curl -X POST http://mini-ubuntu.local:8080/api/lock \
+  -d '{"owner":"ai-bench","reason":"speed run","ttl_seconds":300}'
+# → {"token":"…","lock":{…}}
+```
+
+While it lasts, that machine serves only requests carrying
+`X-AI-Swap-Lock: <token>`; requests and load/unload calls from anyone else get
+`503` with `Retry-After`, saying who holds it and why. Idle unloads and
+resident reloads pause. The holder renews it by POSTing again with the token
+(any request with the token also renews it) and releases it with
+`DELETE /api/lock`; if it stops renewing, the reservation lapses after
+`ttl_seconds`. Releasing brings back the resident models the holder unloaded.
+The UI marks the machine "reserved" and offers a Release button for a
+reservation whose owner crashed (`DELETE /api/lock?force=1`, or
+`?force=1&node=<peer>` for another machine). ai-bench takes one for each run
+when its config has `reserve:`.
 
 ## Running as a service
 
