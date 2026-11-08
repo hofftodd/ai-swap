@@ -48,6 +48,7 @@ type Server struct {
 	transport http.RoundTripper
 	ui        fs.FS
 	stats     *stats.Recorder
+	lock      reservation // see lock.go
 }
 
 // New builds the server. ui may be nil.
@@ -70,6 +71,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/models/{name}/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/models/{name}/stats", s.handleStats)
 	mux.HandleFunc("POST /api/unload", s.handleUnloadAll)
+	mux.HandleFunc("GET /api/lock", s.handleLockStatus)
+	mux.HandleFunc("POST /api/lock", s.handleLock)
+	mux.HandleFunc("DELETE /api/lock", s.handleUnlock)
 	// llama-swap compatibility (llamaswap.go).
 	mux.HandleFunc("GET /running", s.handleRunning)
 	mux.HandleFunc("GET /unload", s.handleUnloadAll)
@@ -141,6 +145,12 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	allowed, done, held := s.lockGate(r)
+	if !allowed {
+		s.reservedError(w, r, held)
+		return
+	}
+	defer done()
 	start := time.Now()
 	port, release, err := s.mgr.Acquire(r.Context(), rt.local)
 	if err != nil {
@@ -289,6 +299,7 @@ func (s *Server) nodeInfo() cluster.NodeInfo {
 		MemoryBudgetGB: s.cfg.Node.MemoryBudgetGB,
 		MemoryUsedGB:   s.mgr.UsedGB(),
 		Models:         s.mgr.Snapshot(),
+		Lock:           s.currentLock(),
 	}
 }
 
@@ -324,6 +335,12 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, action string) {
 		s.cluster.Refresh(rt.peer)
 		return
 	}
+	allowed, done, held := s.lockGate(r)
+	if !allowed {
+		s.reservedError(w, r, held)
+		return
+	}
+	defer done()
 	var err error
 	if action == "load" {
 		err = s.mgr.Load(r.Context(), rt.local)

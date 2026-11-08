@@ -297,6 +297,86 @@ func TestLlamaSwapCompat(t *testing.T) {
 	}
 }
 
+func TestReservation(t *testing.T) {
+	mac := newNode(t, macCfg)
+	do := func(method, path, token, body string) (int, string, http.Header) {
+		req, _ := http.NewRequest(method, mac.url+path, strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set(LockHeader, token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b), resp.Header
+	}
+	chat := `{"model":"qwen","messages":[]}`
+
+	code, body, _ := do("POST", "/api/lock", "", `{"owner":"ai-bench","reason":"run 42","ttl_seconds":60}`)
+	if code != 200 {
+		t.Fatalf("lock: %d %s", code, body)
+	}
+	var got struct{ Token string }
+	_ = json.Unmarshal([]byte(body), &got)
+	if got.Token == "" {
+		t.Fatalf("no token: %s", body)
+	}
+
+	if code, body, h := do("POST", "/v1/chat/completions", "", chat); code != 503 || h.Get("Retry-After") == "" ||
+		!strings.Contains(body, "reserved by ai-bench (run 42)") {
+		t.Fatalf("others while reserved: %d %s", code, body)
+	}
+	if code, _, _ := do("POST", "/api/models/qwen/load", "", ""); code != 503 {
+		t.Fatalf("load by others while reserved: %d", code)
+	}
+	if code, body, _ := do("POST", "/v1/chat/completions", got.Token, chat); code != 200 {
+		t.Fatalf("holder: %d %s", code, body)
+	}
+	if code, _, _ := do("POST", "/api/lock", "", `{"owner":"someone else"}`); code != 409 {
+		t.Fatalf("second reservation: %d", code)
+	}
+	if _, body, _ := do("GET", "/api/node", "", ""); !strings.Contains(body, `"owner":"ai-bench"`) || strings.Contains(body, got.Token) {
+		t.Fatalf("node info should show the lock but not the token: %s", body)
+	}
+	if code, _, _ := do("DELETE", "/api/lock", "", ""); code != 403 {
+		t.Fatalf("release without token: %d", code)
+	}
+	if code, _, _ := do("DELETE", "/api/lock", got.Token, ""); code != 200 {
+		t.Fatalf("release: %d", code)
+	}
+	if code, _, _ := do("POST", "/v1/chat/completions", "", chat); code != 200 {
+		t.Fatalf("after release: %d", code)
+	}
+
+	// Released from another machine, through ?node=.
+	linux := newNode(t, linuxCfg)
+	peered := newNode(t, macCfg, linux.url)
+	req, _ := http.NewRequest("POST", linux.url+"/api/lock", strings.NewReader(`{"owner":"bench"}`))
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("lock linux: %v", err)
+	}
+	req, _ = http.NewRequest("DELETE", peered.url+"/api/lock?force=1&node=linux", nil)
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 200 {
+		t.Fatalf("release via peer: %v %v", err, resp.StatusCode)
+	}
+	if code, _ := post(t, linux.url+"/v1/chat/completions", `{"model":"coder","messages":[]}`); code != 200 {
+		t.Fatalf("linux still reserved: %d", code)
+	}
+
+	// A reservation nobody renews lapses.
+	do("POST", "/api/lock", "", `{"owner":"crashed","ttl_seconds":1}`)
+	if code, _, _ := do("POST", "/v1/chat/completions", "", chat); code != 503 {
+		t.Fatalf("before lapse: %d", code)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if code, _, _ := do("POST", "/v1/chat/completions", "", chat); code != 200 {
+		t.Fatalf("after lapse: %d", code)
+	}
+}
+
 func TestUnknownModelErrorShapes(t *testing.T) {
 	mac := newNode(t, macCfg)
 	code, out := post(t, mac.url+"/v1/messages", `{"model":"nope"}`)

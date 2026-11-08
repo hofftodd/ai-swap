@@ -112,6 +112,7 @@ type Manager struct {
 	// waiting counts callers queued for the lifecycle lock, so background
 	// resident restores never jump ahead of a client's swap.
 	waiting atomic.Int32
+	paused  atomic.Bool // see SetPaused
 }
 
 // New builds a manager for the models in cfg.
@@ -253,6 +254,22 @@ func (m *Manager) StopAll() {
 	wg.Wait()
 }
 
+// SetPaused stops (true) or resumes (false) idle unloads and resident
+// reloads, e.g. while the machine is reserved for a benchmark. Resuming
+// also clears the "unloaded by hand" mark on residents, so the ones the
+// reservation holder unloaded come back.
+func (m *Manager) SetPaused(p bool) {
+	m.paused.Store(p)
+	if !p {
+		m.mu.Lock()
+		for _, inst := range m.instances {
+			inst.held = false
+		}
+		m.notifyLocked()
+		m.mu.Unlock()
+	}
+}
+
 // RunReaper loads resident models, then until ctx is done unloads idle
 // models past their TTL and brings evicted residents back when they fit.
 func (m *Manager) RunReaper(ctx context.Context, every time.Duration) {
@@ -264,6 +281,9 @@ func (m *Manager) RunReaper(ctx context.Context, every time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if m.paused.Load() {
+				continue
+			}
 			m.reapOnce(time.Now())
 			if ctx.Err() == nil {
 				m.restoreResidents()

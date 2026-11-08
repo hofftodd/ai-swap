@@ -69,9 +69,11 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 	go mgr.RunReaper(ctx, 15*time.Second)
 	go cl.Run(ctx, 10*time.Second)
 
+	sv := server.New(cfg, mgr, cl, web.FS(), log)
+	go sv.ExpireLocks(ctx, 5*time.Second)
 	srv := &http.Server{
 		Addr:              cfg.Node.Listen,
-		Handler:           server.New(cfg, mgr, cl, web.FS(), log).Handler(),
+		Handler:           sv.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	errc := make(chan error, 1)

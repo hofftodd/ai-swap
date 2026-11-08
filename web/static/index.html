@@ -96,6 +96,10 @@ button.ghost:hover { background: var(--bg); border-color: transparent; }
 .node-head .nname { display: flex; align-items: center; gap: 6px; }
 .node-head .srv { width: 16px; height: 16px; flex: none; color: var(--muted); }
 .node-head.off .srv { color: var(--bad); }
+.pill.res { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 50%, transparent); }
+.resv { grid-column: 1 / 3; display: flex; gap: 10px; align-items: center; font-size: 13px; padding: 6px 10px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent); background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.resv span { flex: 1; }
 .mbar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; display: flex; gap: 1px; }
 .mbar > i { display: block; height: 100%; background: var(--seg-ready); }
 .mbar > i.busy { background: var(--seg-busy); }
@@ -572,7 +576,7 @@ function buildFleet() {
   if (!status) return;
   const addNode = (name, local, online, n, err, seen) => nodes.push({
     name, local, online, error: err, budget: n?.memory_budget_gb || 0, used: n?.memory_used_gb || 0, models: n?.models || [],
-    version: n?.version || "", os: n?.os || "", arch: n?.arch || "", seen,
+    version: n?.version || "", os: n?.os || "", arch: n?.arch || "", seen, lock: n?.lock || null,
   });
   addNode(status.node.name, true, true, status.node);
   for (const p of status.peers || []) addNode(p.name, false, !!(p.online && p.node), p.node, p.error, p.last_seen);
@@ -613,6 +617,11 @@ function memBar(nd) {
     .map(m => `<i class="${segClass(m)}" style="width:${Math.min(100, 100 * (m.memory_gb || 0) / total).toFixed(2)}%" title="${esc(m.name)}: ${gb(m.memory_gb)}${m.inflight ? ", busy" : m.state === "ready" ? "" : ", " + m.state}"></i>`).join("");
   return `<span class="mbar" role="img" aria-label="${esc(nd.name)} memory: ${nd.used.toFixed(0)} of ${nd.budget ? nd.budget.toFixed(0) + " GB" : "unlimited"} reserved">${segs}</span>`;
 }
+function lockText(l) {
+  if (!l) return "";
+  const at = new Date(l.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `Reserved by ${l.owner}${l.reason ? ` (${l.reason})` : ""} since ${at}. Requests from anyone else are refused until it's released.`;
+}
 function age(t) {
   if (!t) return "";
   const s = (Date.now() - Date.parse(t)) / 1000;
@@ -631,7 +640,7 @@ function renderModelList() {
     if (q && !list.length) continue;
     const open = !!q || !collapsed.has(nd.name);
     html += `<button class="node-head${nd.online ? "" : " off"}" data-node="${esc(nd.name)}" data-k="node:${esc(nd.name)}" aria-expanded="${open}" title="${esc(nd.name)}${nd.online ? "" : ": offline"}">
-      <span class="caret" aria-hidden="true">▾</span><span class="nname">${SERVER_ICON}${esc(nd.name)}${multi && nd.local ? `<span class="tag">this machine</span>` : ""}</span>
+      <span class="caret" aria-hidden="true">▾</span><span class="nname">${SERVER_ICON}${esc(nd.name)}${multi && nd.local ? `<span class="tag">this machine</span>` : ""}${nd.lock ? `<span class="pill res" title="${esc(lockText(nd.lock))}">reserved</span>` : ""}</span>
       ${nd.online ? `<span class="nmem">${nd.used.toFixed(0)} / ${nd.budget ? nd.budget.toFixed(0) : "∞"} GB</span>
       <span></span>${memBar(nd)}` : `<span class="node-off">offline</span>`}</button>`;
     if (!open) continue;
@@ -688,8 +697,14 @@ function renderTop() {
 // What sending will do, when the selected model isn't loaded yet.
 function renderNotice() {
   const n = $("notice"), m = info(selected);
+  const nd = m && nodes.find(x => x.name === m.node);
+  if (nd?.lock && !streaming) {
+    const html = `<span class="ico">⚠︎</span><span><b>${esc(nd.name)}</b>: ${esc(lockText(nd.lock))}</span>`;
+    if (n.innerHTML !== html) n.innerHTML = html;
+    n.classList.remove("hidden");
+    return;
+  }
   if (!m || m.state === "ready" || streaming) { n.classList.add("hidden"); n.innerHTML = ""; return; }
-  const nd = nodes.find(x => x.name === m.node);
   let html;
   if (m.state === "starting" || pending.get(m.id) === "load") {
     html = `<span class="ico">◌</span><span><b>${esc(m.id)}</b> is ${esc(stateWord(m).text)}. You can send now; the reply starts once it's ready.</span>`;
@@ -801,6 +816,7 @@ function renderFleet() {
     const busyLegend = nd.models.some(m => m.state === "ready" && m.inflight), loadLegend = nd.models.some(m => m.state === "starting");
     html += `<section class="ncard${nd.online ? "" : " off"}" aria-label="${esc(nd.name)}">
       <div class="ncard-head"><div><h3><span class="dot ${nd.online ? "ready" : "failed"}"></span>${esc(nd.name)}</h3><div class="nsub">${esc(facts)}</div></div>
+        ${nd.lock ? `<div class="resv" role="note"><span>${esc(lockText(nd.lock))}</span><button class="small" data-act="release" data-ref="${esc(nd.name)}" data-k="rl:${esc(nd.name)}" title="Release it now, e.g. if the benchmark crashed">Release</button></div>` : ""}
         ${nd.online ? `<div class="nmem"><b>${nd.used.toFixed(0)}</b> / ${nd.budget ? nd.budget.toFixed(0) + " GB" : "∞"} reserved</div>${memBar(nd)}
         <div class="legend">${nd.models.filter(m => isUp(m)).map(m => `<span><i class="${segClass(m)}"></i>${esc(m.name)} ${gb(m.memory_gb)}</span>`).join("") || "<span>Nothing loaded</span>"}
           ${busyLegend ? `<span><i class="busy"></i>busy</span>` : ""}${loadLegend ? `<span><i class="starting"></i>loading</span>` : ""}</div>` : `<div class="nmem">${esc(nd.error || "")}</div>`}</div>`;
@@ -843,6 +859,18 @@ async function modelAction(id, act) {
   } finally {
     clearTimeout(poll); pending.delete(id); refresh();
   }
+}
+
+async function releaseLock(node) {
+  const nd = nodes.find(x => x.name === node);
+  if (!nd?.lock || !confirm(`Release ${node}? ${lockText(nd.lock)}\n\nIf that benchmark is still running, its results will be disturbed.`)) return;
+  try {
+    // ai-swap forwards ?node=<peer> to that machine.
+    const r = await fetch(`/api/lock?force=1&node=${encodeURIComponent(node)}`, { method: "DELETE" });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    toast(`Released ${node}.`);
+  } catch (e) { toast(`Couldn't release ${node}: ${e.message}`, "bad", 8000); }
+  refresh();
 }
 
 let logFor = "", logTimer = 0;
@@ -1276,6 +1304,7 @@ $("fleet").addEventListener("click", (e) => {
   if (!b) return;
   if (b.dataset.act === "logs") openLogs(b.dataset.ref);
   else if (b.dataset.act === "chat") { showView("chat"); selectModel(b.dataset.ref); }
+  else if (b.dataset.act === "release") releaseLock(b.dataset.ref);
   else modelAction(b.dataset.ref, b.dataset.act);
 });
 $("side").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeDrawers(); });

@@ -46,6 +46,12 @@ func (s *Server) handleRunning(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleUnloadAll(w http.ResponseWriter, r *http.Request) {
+	allowed, done, held := s.lockGate(r)
+	if !allowed {
+		s.reservedError(w, r, held)
+		return
+	}
+	defer done()
 	var errs []error
 	for _, st := range s.mgr.Snapshot() {
 		if st.State == scheduler.Stopped || st.State == scheduler.Failed {
@@ -68,6 +74,12 @@ func (s *Server) handleUpstream(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown model"})
 		return
 	}
+	allowed, done, held := s.lockGate(r)
+	if !allowed {
+		s.reservedError(w, r, held)
+		return
+	}
+	defer done()
 	var port int
 	for _, st := range s.mgr.Snapshot() {
 		if st.Name == m.Name && st.State == scheduler.Ready {

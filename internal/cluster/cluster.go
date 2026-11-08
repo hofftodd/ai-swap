@@ -31,6 +31,17 @@ type NodeInfo struct {
 	MemoryBudgetGB float64            `json:"memory_budget_gb"`
 	MemoryUsedGB   float64            `json:"memory_used_gb"`
 	Models         []scheduler.Status `json:"models"`
+	// Lock is set while a client (e.g. a benchmark run) has reserved this machine.
+	Lock *LockInfo `json:"lock,omitempty"`
+}
+
+// LockInfo describes a reservation of a machine (the token is never shown).
+type LockInfo struct {
+	Owner   string    `json:"owner"`
+	Reason  string    `json:"reason,omitempty"`
+	Models  []string  `json:"models,omitempty"`
+	Since   time.Time `json:"since"`
+	Expires time.Time `json:"expires"`
 }
 
 // PeerState is the last known state of a peer.
