@@ -18,6 +18,10 @@
   failed forward marks the peer offline at once; a model on an offline peer
   gets `503` with `Retry-After: 10` naming the node instead of `404`.
 - `/v1/models` entries carry `context_length` when the model sets `ctx`.
+- Peers are dialled over IPv4 first, falling back to any address family. On
+  a LAN with mDNS names, a host with IPv6 turned off made every macOS lookup
+  wait 5 s for an AAAA answer (longer than a peer poll allows), and one
+  publishing unreachable IPv6 addresses hung new connections.
 - UI pass for several machines: a stacked memory bar per machine showing which
   models hold the memory (busy and loading ones marked), a one-line cluster
   summary, model sizes in the sidebar, a Models view with one card per machine
@@ -26,6 +30,8 @@
   them, user turns as right-aligned bubbles and flat assistant replies, a
   single rounded composer, an empty state that shows what the next message
   will do, and no empty speed tiles before the first request.
+- A new logo (a brain between the swap arrows) and a small server icon next
+  to each machine in the sidebar, red when the machine is offline.
 
 - Claude Code works with strict chat templates (e.g. Qwen 3.8): mid-conversation
   `system` messages in `/v1/messages` requests are folded into the adjacent

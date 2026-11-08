@@ -93,6 +93,9 @@ button.ghost:hover { background: var(--bg); border-color: transparent; }
 .node-head .nmem { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .node-head .bar { grid-column: 2 / 4; }
 .node-head .tag { font-weight: 400; color: var(--faint); font-size: 11px; margin-left: 4px; }
+.node-head .nname { display: flex; align-items: center; gap: 6px; }
+.node-head .srv { width: 15px; height: 15px; flex: none; color: var(--muted); }
+.node-head.off .srv { color: var(--bad); }
 .mbar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; display: flex; gap: 1px; }
 .mbar > i { display: block; height: 100%; background: var(--seg-ready); }
 .mbar > i.busy { background: var(--seg-busy); }
@@ -334,7 +337,7 @@ dialog#logs::backdrop { background: rgb(0 0 0 / .35); }
 <body>
 <aside id="side" aria-label="Models and chats">
   <div class="side-head">
-    <h1><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b7bff"/><stop offset="1" stop-color="#7a4cf0"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 27a17 17 0 0 1 29-9.5L48.5 22"/><path d="M48.5 11.5V22H38"/><path d="M48.5 37a17 17 0 0 1-29 9.5L15.5 42"/><path d="M15.5 52.5V42H26"/></g><circle cx="32" cy="32" r="5" fill="#fff"/></svg>ai-swap <span id="ver"></span></h1>
+    <h1><svg viewBox="0 0 64 64" aria-hidden="true"><defs> <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"> <stop offset="0" stop-color="#3b7bff"/> <stop offset="1" stop-color="#7a4cf0"/> </linearGradient> </defs> <rect width="64" height="64" rx="14" fill="url(#lg)"/> <g fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round"> <g stroke-width="4"> <path d="M13 15.5C20 9.5 44 9.5 51 15.5"/> <path d="M45.9 15.2L51 15.5l-.6-5.1"/> <path d="M51 48.5C44 54.5 20 54.5 13 48.5"/> <path d="M18.1 48.8L13 48.5l.6 5.1"/> </g> <g stroke-width="2" transform="translate(32 32.3) scale(1.55) translate(-12 -12)"> <path d="M12 5.5A3 3 0 0 0 6.4 5.9 3.6 3.6 0 0 0 4.1 11.4 3.6 3.6 0 0 0 5.4 17 3.2 3.2 0 0 0 12 18.6Z"/> <path d="M12 5.5A3 3 0 0 1 17.6 5.9 3.6 3.6 0 0 1 19.9 11.4 3.6 3.6 0 0 1 18.6 17 3.2 3.2 0 0 1 12 18.6Z"/> <path d="M6.7 11.3c1.4 0 2.5-.9 2.7-2.3M17.3 11.3c-1.4 0-2.5-.9-2.7-2.3M7.6 16.2c.2-1.3 1.2-2.2 2.6-2.3M16.4 16.2c-.2-1.3-1.2-2.2-2.6-2.3"/> </g> </g></svg>ai-swap <span id="ver"></span></h1>
     <button class="ghost small close-btn" data-close aria-label="Close menu">✕</button>
   </div>
   <div id="cluster" aria-live="polite"></div>
@@ -599,6 +602,8 @@ function stateWord(m) {
   return { text: "", cls: "" };
 }
 const isUp = (m) => !!m && (m.state === "ready" || m.state === "starting");
+// A small rack server: two stacked units with status lights.
+const SERVER_ICON = `<svg class="srv" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2" y="2.5" width="12" height="4.5" rx="1.2"/><rect x="2" y="9" width="12" height="4.5" rx="1.2"/><circle cx="4.8" cy="4.75" r=".75" fill="currentColor" stroke="none"/><circle cx="4.8" cy="11.25" r=".75" fill="currentColor" stroke="none"/><path d="M8 4.75h3.5M8 11.25h3.5" stroke-linecap="round"/></svg>`;
 const gb = (v) => v ? (v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "")) + " GB" : "";
 const segClass = (m) => m.state === "ready" ? (m.inflight ? "busy" : "") : m.state;
 // One segment per model holding memory, so you can see what a swap would push out.
@@ -625,8 +630,8 @@ function renderModelList() {
       .sort((a, b) => (isUp(b) - isUp(a)) || a.name.localeCompare(b.name));
     if (q && !list.length) continue;
     const open = !!q || !collapsed.has(nd.name);
-    html += `<button class="node-head" data-node="${esc(nd.name)}" data-k="node:${esc(nd.name)}" aria-expanded="${open}" title="${esc(nd.name)}${nd.online ? "" : ": offline"}">
-      <span class="caret" aria-hidden="true">▾</span><span class="nname">${esc(nd.name)}${multi && nd.local ? `<span class="tag">this machine</span>` : ""}</span>
+    html += `<button class="node-head${nd.online ? "" : " off"}" data-node="${esc(nd.name)}" data-k="node:${esc(nd.name)}" aria-expanded="${open}" title="${esc(nd.name)}${nd.online ? "" : ": offline"}">
+      <span class="caret" aria-hidden="true">▾</span><span class="nname">${SERVER_ICON}${esc(nd.name)}${multi && nd.local ? `<span class="tag">this machine</span>` : ""}</span>
       ${nd.online ? `<span class="nmem">${nd.used.toFixed(0)} / ${nd.budget ? nd.budget.toFixed(0) : "∞"} GB</span>
       <span></span>${memBar(nd)}` : `<span class="node-off">offline</span>`}</button>`;
     if (!open) continue;
