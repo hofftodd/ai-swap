@@ -2,487 +2,1013 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>ai-swap</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="mask-icon" href="favicon.svg" color="#3b7bff">
 <style>
 :root {
-  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66;
-  --border: #e3e2dd; --accent: #2f6fde; --accent-text: #fff;
-  --user: #eef3fd; --code: #f1f0ec; --ok: #1f8a4c; --warn: #b7791f; --bad: #c53030;
+  color-scheme: light dark;
+  --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --faint: #8f8f88;
+  --border: #e3e2dd; --accent: #2f6fde; --accent-text: #fff; --accent-soft: #e8effc;
+  --user: #eef3fd; --code: #f1f0ec; --ok: #1f8a4c; --warn: #a86b12; --bad: #c53030;
+  --shadow: 0 8px 28px rgb(0 0 0 / .14);
+  --side-w: 268px; --stats-w: 320px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #9a9a93;
-    --border: #33332f; --accent: #6b9cf5; --accent-text: #0d0d0c;
+    --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #a3a39b; --faint: #7d7d76;
+    --border: #33332f; --accent: #6b9cf5; --accent-text: #0d0d0c; --accent-soft: #233150;
     --user: #22293a; --code: #2a2a27; --ok: #4ccb84; --warn: #e2b04a; --bad: #f07171;
+    --shadow: 0 8px 28px rgb(0 0 0 / .5);
   }
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 body {
-  background: var(--bg); color: var(--text);
+  height: 100dvh; background: var(--bg); color: var(--text);
   font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
-  display: grid; grid-template-columns: 260px 1fr 320px; grid-template-rows: 100%;
+  display: grid; grid-template-columns: var(--side-w) minmax(0, 1fr) var(--stats-w); grid-template-rows: 100%;
+  overflow: hidden;
 }
-button, select, textarea { font: inherit; color: inherit; }
+body.no-stats { grid-template-columns: var(--side-w) minmax(0, 1fr); }
+button, input, textarea { font: inherit; color: inherit; }
 button {
   border: 1px solid var(--border); background: var(--panel); border-radius: 8px;
   padding: 6px 12px; cursor: pointer;
 }
 button:hover { border-color: var(--muted); }
+button:disabled { opacity: .55; cursor: default; }
 button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
-button.small { padding: 2px 8px; font-size: 13px; }
-aside {
+button.small { padding: 2px 9px; font-size: 13px; }
+button.ghost { border-color: transparent; background: none; }
+button.ghost:hover { background: var(--bg); border-color: transparent; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+.dot.ready { background: var(--ok); }
+.dot.starting, .dot.stopping { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.dot.failed { background: var(--bad); }
+.dot.stopped { background: transparent; box-shadow: inset 0 0 0 1.5px var(--faint); }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none !important; } }
+.pill { font-size: 11px; line-height: 16px; padding: 0 6px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); white-space: nowrap; }
+.bar { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); }
+.hidden { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.close-btn { display: none; }
+
+/* ---- sidebar ---- */
+#side {
   border-right: 1px solid var(--border); background: var(--panel);
-  display: flex; flex-direction: column; min-height: 0;
+  display: flex; flex-direction: column; min-height: 0; min-width: 0;
 }
-aside header { padding: 14px; display: flex; gap: 8px; align-items: center; justify-content: space-between; }
-aside h1 { font-size: 16px; margin: 0; }
+.side-head { padding: 12px 12px 8px 14px; display: flex; gap: 8px; align-items: center; }
+.side-head h1 { font-size: 16px; margin: 0; flex: 1; display: flex; align-items: baseline; gap: 6px; }
+#ver { font-weight: 400; font-size: 12px; color: var(--muted); }
+.filter { margin: 0 10px 6px; position: relative; }
+.filter input {
+  width: 100%; padding: 6px 28px 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg); font-size: 14px;
+}
+.filter kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font: 11px ui-monospace, monospace; color: var(--faint); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 .side-title {
-  padding: 10px 14px 4px; font-size: 12px; font-weight: 600; letter-spacing: .04em;
+  padding: 8px 14px 4px; font-size: 11px; font-weight: 600; letter-spacing: .06em;
   text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; align-items: center;
 }
-.side-title button { text-transform: none; letter-spacing: 0; font-weight: 400; }
-#modelList { flex: 0 1 auto; overflow: auto; padding: 0 8px; min-height: 80px; }
-#chats { flex: 1 1 0; overflow: auto; padding: 0 8px; min-height: 80px; }
-.model-node { padding: 6px 10px 2px; font-size: 12px; color: var(--muted); }
-.model-item {
-  width: 100%; text-align: left; border-radius: 8px; cursor: pointer;
-  padding: 4px 6px 4px 10px; display: flex; align-items: center; gap: 2px; font-size: 14px; min-height: 32px;
+.side-title button { text-transform: none; letter-spacing: 0; font-weight: 500; }
+#modelList { flex: 0 1 auto; max-height: 62%; overflow: auto; padding: 0 6px 6px; }
+#chatList { flex: 1 1 auto; min-height: 96px; overflow: auto; padding: 0 6px 10px; }
+.node-head {
+  width: 100%; display: grid; grid-template-columns: auto 1fr auto; gap: 2px 8px; align-items: center;
+  padding: 7px 8px 6px; margin-top: 2px; border: 0; border-radius: 8px; background: none; text-align: left; font-size: 13px;
 }
-.model-item:hover, .model-item:focus-visible { background: var(--bg); }
-.model-item .mact {
-  visibility: hidden; border: 1px solid var(--border); background: var(--panel); color: var(--muted);
-  padding: 0; width: 24px; height: 24px; margin-left: 6px; border-radius: 6px; font-size: 11px; line-height: 1; flex: none;
+.node-head:hover { background: var(--bg); }
+.node-head .nname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-head .nmem { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.node-head .bar { grid-column: 2 / 4; }
+.node-head .caret { color: var(--faint); font-size: 10px; width: 8px; transition: transform .15s; }
+.node-head[aria-expanded="false"] .caret { transform: rotate(-90deg); }
+.node-off { color: var(--bad); font-size: 12px; }
+.model-li { display: flex; align-items: center; border-radius: 8px; position: relative; }
+.model-li:hover { background: var(--bg); }
+.model-li.active { background: var(--accent-soft); }
+.model-row {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; text-align: left;
+  border: 0; background: none; padding: 6px 4px 6px 10px; font-size: 14px; border-radius: 8px;
 }
-.model-item:hover .mact, .model-item:focus-within .mact, .model-item .mact.pending { visibility: visible; }
-.model-item .mact:hover { color: var(--text); border-color: var(--muted); }
-.model-item .mact:disabled { cursor: wait; }
-@media (hover: none) { .model-item .mact { visibility: visible; } }
-.model-item.active { background: var(--user); }
-.model-item .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-item .tag { font-size: 11px; color: var(--muted); margin-left: 6px; white-space: nowrap; }
-.chat-item {
-  padding: 8px 10px; border-radius: 8px; cursor: pointer; white-space: nowrap;
-  overflow: hidden; text-overflow: ellipsis; display: flex; justify-content: space-between; gap: 6px;
+.model-row .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-row .state { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.model-row .state.bad { color: var(--bad); }
+.row-act { visibility: hidden; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 12px; padding: 1px 8px; box-shadow: -10px 0 8px -2px var(--panel); }
+.model-li:hover .row-act { box-shadow: -10px 0 8px -2px var(--bg); }
+.model-li.active .row-act { box-shadow: -10px 0 8px -2px var(--accent-soft); }
+.model-li:hover .row-act, .model-li:focus-within .row-act, .row-act.pending { visibility: visible; }
+.chat-li { display: flex; align-items: center; border-radius: 8px; }
+.chat-li:hover { background: var(--bg); }
+.chat-li.active { background: var(--accent-soft); }
+.chat-open { flex: 1; min-width: 0; text-align: left; border: 0; background: none; padding: 6px 4px 6px 10px; border-radius: 8px; }
+.chat-open .ctitle { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.chat-open .cmodel { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.chat-del { visibility: hidden; flex: none; border: 0; background: none; color: var(--muted); padding: 4px 8px; }
+.chat-li:hover .chat-del, .chat-li:focus-within .chat-del { visibility: visible; }
+.chat-del:hover { color: var(--bad); }
+.side-empty { color: var(--muted); font-size: 13px; padding: 6px 10px; }
+@media (hover: none) {
+  .row-act, .chat-del { visibility: visible; }
+  .row-act { position: static; transform: none; box-shadow: none !important; margin-right: 4px; flex: none; }
+  .model-row .state.quiet { display: none; } /* the dot and the Unload button already say "loaded" */
 }
-.chat-item:hover { background: var(--bg); }
-.chat-item.active { background: var(--user); }
-.chat-item .del { visibility: hidden; color: var(--muted); border: 0; background: none; padding: 0 4px; }
-.chat-item:hover .del { visibility: visible; }
-#nodes { border-top: 1px solid var(--border); padding: 12px 14px; font-size: 13px; }
-.node { margin-bottom: 10px; }
-.node .name { display: flex; justify-content: space-between; }
-.bar { height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; margin-top: 4px; }
-.bar > div { height: 100%; background: var(--accent); }
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+
+/* ---- main ---- */
 main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .topbar {
-  display: flex; gap: 10px; align-items: center; padding: 10px 16px;
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px; min-width: 0;
   border-bottom: 1px solid var(--border); background: var(--panel);
 }
-.topbar select { padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); max-width: 60vw; }
+#sideToggle { display: none; }
+.chip {
+  display: flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto;
+  border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px 4px 10px; background: var(--panel);
+}
+.chip .cname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chip .cstate { color: var(--muted); font-size: 13px; white-space: nowrap; }
 .topbar .spacer { flex: 1; }
-#modelState { font-size: 13px; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex: none; }
+.seg button { border: 0; border-radius: 0; padding: 3px 12px; font-size: 13px; background: var(--panel); }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-selected="true"] { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+#statsToggle { flex: none; }
+#statsToggle[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); }
+#offline { background: var(--bad); color: #fff; font-size: 13px; padding: 4px 12px; text-align: center; }
 #view-chat, #view-models { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-#messages { flex: 1; overflow: auto; padding: 24px 16px; }
-.msg { max-width: 820px; margin: 0 auto 18px; }
+#messages { flex: 1; overflow: auto; padding: 24px 16px 8px; overscroll-behavior: contain; }
+.msg { max-width: 820px; margin: 0 auto 20px; }
 .msg .role { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .msg .body { padding: 10px 14px; border-radius: 10px; overflow-wrap: anywhere; }
 .msg.user .body { background: var(--user); white-space: pre-wrap; }
 .msg.assistant .body { background: var(--panel); border: 1px solid var(--border); }
-.msg .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
-.msg.error .body { border-color: var(--bad); color: var(--bad); }
-.body pre { background: var(--code); padding: 10px; border-radius: 6px; overflow: auto; }
-.body code { background: var(--code); padding: 1px 4px; border-radius: 4px; font: 13px/1.45 ui-monospace, Menlo, monospace; }
-.body pre code { background: none; padding: 0; }
-.body p { margin: 0 0 8px; } .body p:last-child { margin-bottom: 0; }
+.msg .meta { font-size: 12px; color: var(--muted); margin-top: 4px; display: flex; gap: 10px; align-items: center; min-height: 22px; flex-wrap: wrap; }
+.msg .meta .acts { display: inline-flex; gap: 2px; opacity: 0; transition: opacity .1s; }
+.msg:hover .meta .acts, .msg:focus-within .meta .acts, .msg.last .meta .acts { opacity: 1; }
+@media (hover: none) { .msg .meta .acts { opacity: 1; } }
+.msg .meta .acts button { font-size: 12px; padding: 0 7px; }
+.msg .err { color: var(--bad); border-top: 1px solid var(--border); margin-top: 8px; padding-top: 6px; font-size: 14px; }
+.msg .err:empty { display: none; }
+.msg .waiting { color: var(--muted); font-style: italic; }
+.body > .content > :first-child { margin-top: 0; }
+.body > .content > :last-child { margin-bottom: 0; }
+.content p, .content ul, .content ol, .content blockquote, .content table, .content .code { margin: 0 0 10px; }
+.content h1, .content h2, .content h3, .content h4, .content h5, .content h6 { margin: 14px 0 6px; line-height: 1.3; }
+.content h1 { font-size: 1.3em; } .content h2 { font-size: 1.18em; } .content h3 { font-size: 1.06em; } .content h4, .content h5, .content h6 { font-size: 1em; }
+.content ul, .content ol { padding-left: 22px; }
+.content li > ul, .content li > ol { margin: 2px 0; }
+.content blockquote { border-left: 3px solid var(--border); padding-left: 12px; color: var(--muted); }
+.content hr { border: 0; border-top: 1px solid var(--border); margin: 12px 0; }
+.content a { color: var(--accent); }
+.content table { border-collapse: collapse; display: block; overflow-x: auto; max-width: 100%; }
+.content th, .content td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; font-size: 14px; }
+.content th { background: var(--bg); }
+.content code { background: var(--code); padding: 1px 4px; border-radius: 4px; font: 13px/1.45 ui-monospace, Menlo, monospace; }
+.code { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--code); }
+.code-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 6px 2px 10px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--border); }
+.code-head button { font-size: 12px; padding: 0 8px; }
+.code pre { margin: 0; padding: 10px; overflow: auto; }
+.code pre code { background: none; padding: 0; }
+.code.wrap pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 details.thinking { margin-bottom: 8px; color: var(--muted); font-size: 14px; }
-details.thinking > div { white-space: pre-wrap; border-left: 2px solid var(--border); padding-left: 10px; }
-.composer { border-top: 1px solid var(--border); background: var(--panel); padding: 12px 16px; }
-.composer form { max-width: 820px; margin: 0 auto; display: flex; gap: 8px; align-items: flex-end; }
-.composer textarea {
+details.thinking summary { cursor: pointer; user-select: none; }
+details.thinking .think-text { white-space: pre-wrap; border-left: 2px solid var(--border); padding-left: 10px; margin-top: 4px; max-height: 18em; overflow: auto; }
+.empty { color: var(--muted); text-align: center; margin: 16vh auto 0; max-width: 460px; }
+.empty b { color: var(--text); }
+.composer { border-top: 1px solid var(--border); background: var(--panel); padding: 8px 16px calc(10px + env(safe-area-inset-bottom)); }
+.composer .inner { max-width: 820px; margin: 0 auto; }
+#notice { font-size: 13px; color: var(--muted); padding: 2px 2px 8px; display: flex; gap: 8px; align-items: baseline; }
+#notice b { color: var(--text); font-weight: 600; }
+#notice .ico { color: var(--warn); }
+#form { display: flex; gap: 8px; align-items: flex-end; }
+#input {
   flex: 1; resize: none; line-height: 1.4; min-height: calc(4.2em + 22px); max-height: 240px; padding: 10px 12px;
   border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
 }
-.empty { color: var(--muted); text-align: center; margin-top: 18vh; }
+.hint { font-size: 11px; color: var(--faint); padding: 4px 2px 0; }
+@media (pointer: coarse) { #input { font-size: 16px; } .hint { display: none; } }
+
+/* ---- models table ---- */
 #view-models { overflow: auto; padding: 16px; }
-table { border-collapse: collapse; width: 100%; max-width: 1100px; margin: 0 auto; }
-th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
-th { color: var(--muted); font-weight: 500; }
-#logs {
-  max-width: 1100px; margin: 16px auto; white-space: pre-wrap; background: var(--code);
-  padding: 12px; border-radius: 8px; font: 12px/1.4 ui-monospace, Menlo, monospace;
-  max-height: 50vh; overflow: auto; display: none;
-}
-.hidden { display: none !important; }
-#statsPane {
-  display: block;
-  border-left: 1px solid var(--border); border-right: 0; background: var(--panel); overflow: auto;
+table.fleet { border-collapse: collapse; width: 100%; max-width: 1100px; margin: 0 auto; }
+.fleet th, .fleet td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
+.fleet th { color: var(--muted); font-weight: 500; position: sticky; top: -16px; background: var(--bg); }
+.fleet td.nw { white-space: nowrap; }
+.fleet .state { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
+.fleet .sub { color: var(--muted); font-size: 12px; }
+.fleet .errtxt { color: var(--bad); font-size: 12px; }
+.fleet .node-row td { font-weight: 600; background: var(--bg); color: var(--muted); font-size: 13px; }
+
+/* ---- stats pane ---- */
+#stats {
+  border-left: 1px solid var(--border); background: var(--panel); overflow: auto;
   padding: 0 14px 16px; font-size: 13px; min-width: 0;
 }
-body.no-stats { grid-template-columns: 260px 1fr; }
-body.no-stats #statsPane { display: none; }
-#statsPane h2 { font-size: 15px; margin: 14px 0 2px; overflow-wrap: anywhere; }
-#statsPane .sub { color: var(--muted); margin-bottom: 6px; }
-#statsPane h3 {
-  font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
-  color: var(--muted); margin: 16px 0 6px; padding-top: 10px; border-top: 1px solid var(--border);
-}
-#statsPane dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; }
-#statsPane dt { color: var(--muted); white-space: nowrap; }
-#statsPane dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-#statsPane .big { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.1; }
-#statsPane .big small { font-size: 13px; font-weight: 400; color: var(--muted); }
-#statsPane .kpis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 6px 0 10px; }
-#statsPane .kpi .label { color: var(--muted); font-size: 12px; }
-#statsPane .meter { margin: 6px 0 10px; }
-#statsPane .meter .row { display: flex; justify-content: space-between; gap: 8px; }
-#statsPane .meter .row span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; }
-#statsPane svg.spark { width: 100%; height: 34px; display: block; color: var(--accent); }
-#statsPane .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
-#statsPane .actions { display: flex; gap: 6px; margin: 8px 0 2px; }
-#statsPane .actions button:disabled { opacity: .6; cursor: wait; }
-#statsLogs {
-  white-space: pre-wrap; background: var(--code); padding: 8px; border-radius: 6px; margin-top: 8px;
-  font: 11px/1.4 ui-monospace, Menlo, monospace; max-height: 40vh; overflow: auto;
-}
+body.no-stats #stats { display: none; }
+.st-top { display: flex; align-items: flex-start; gap: 8px; }
+#stats h2 { font-size: 15px; margin: 14px 0 2px; overflow-wrap: anywhere; flex: 1; }
+#stats .sub { color: var(--muted); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+#stats .actions { display: flex; gap: 6px; margin: 10px 0 4px; }
+#stats .note { color: var(--muted); font-size: 12px; margin-top: 6px; }
+#stats .note.bad { color: var(--bad); }
+.kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 14px 0 4px; }
+.kpi .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+.kpi .big { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.kpi .big small { font-size: 12px; font-weight: 400; color: var(--muted); }
+.kpi .subv { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.lastrun { font-size: 11px; color: var(--muted); }
+.spark-wrap { position: relative; margin: 6px 0 2px; padding-top: 13px; color: var(--accent); }
+.spark-wrap svg { width: 100%; height: 34px; display: block; }
+.spark-wrap .smax { position: absolute; right: 0; top: 0; font-size: 10px; line-height: 12px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0; }
+.chips span { font-size: 12px; padding: 1px 7px; border-radius: 6px; background: var(--bg); border: 1px solid var(--border); white-space: nowrap; }
+.meter { margin: 8px 0; }
+.meter .row { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 3px; }
+.meter .row span:last-child { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.reqline { color: var(--muted); margin: 6px 0; }
+details.more { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 8px; }
+details.more > summary { cursor: pointer; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+details.more h3 { font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; color: var(--faint); margin: 12px 0 4px; }
+#stats dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; margin: 0; }
+#stats dt { color: var(--muted); white-space: nowrap; }
+#stats dd { margin: 0; text-align: right; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+
+/* ---- dialog, toast, drawers ---- */
+dialog#logs { width: min(960px, 94vw); max-height: 86dvh; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); color: var(--text); box-shadow: var(--shadow); }
+dialog#logs::backdrop { background: rgb(0 0 0 / .35); }
+.dlg-head { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--border); }
+.dlg-head b { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dlg-head label { font-size: 13px; color: var(--muted); display: flex; gap: 4px; align-items: center; }
+#logText { margin: 0; padding: 12px 16px; height: min(70dvh, 640px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, monospace; background: var(--code); }
+#toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); z-index: 30; display: flex; flex-direction: column; gap: 6px; align-items: center; pointer-events: none; }
+.toast { pointer-events: auto; background: var(--text); color: var(--bg); padding: 8px 12px; border-radius: 10px; font-size: 14px; box-shadow: var(--shadow); display: flex; gap: 12px; align-items: center; max-width: 90vw; }
+.toast.bad { background: var(--bad); color: #fff; }
+.toast button { background: none; color: inherit; border-color: currentColor; font-size: 13px; padding: 1px 8px; }
+#backdrop { display: none; position: fixed; inset: 0; background: rgb(0 0 0 / .32); z-index: 9; }
+
 @media (max-width: 1100px) {
-  body:not(.show-stats) { grid-template-columns: 260px 1fr; }
-  body:not(.show-stats) #statsPane { display: none; }
-  body.show-stats #statsPane { display: block; position: fixed; inset: 0 0 0 auto; width: min(340px, 90vw); z-index: 6; box-shadow: -4px 0 16px rgb(0 0 0 / .15); }
+  body, body.no-stats { grid-template-columns: var(--side-w) minmax(0, 1fr); }
+  #stats, body.no-stats #stats { display: none; }
+  body.stats-open #stats { display: block; position: fixed; inset: 0 0 0 auto; width: min(360px, 92vw); z-index: 10; box-shadow: var(--shadow); }
+  body.stats-open #backdrop { display: block; }
+  body.stats-open #stats .close-btn { display: inline-block; }
 }
 @media (max-width: 760px) {
-  body, body:not(.show-stats) { grid-template-columns: 1fr; }
-  aside { display: none; }
-  body.show-side aside { display: flex; position: fixed; inset: 0 25% 0 0; z-index: 5; }
+  body, body.no-stats { grid-template-columns: minmax(0, 1fr); }
+  #side { display: none; }
+  body.side-open #side { display: flex; position: fixed; inset: 0 auto 0 0; width: min(320px, 86vw); z-index: 10; box-shadow: var(--shadow); }
+  body.side-open #backdrop { display: block; }
+  body.side-open #side .close-btn { display: inline-block; }
+  #sideToggle { display: inline-block; flex: none; }
+  .seg { display: none; }
+  .chip { flex: 1 1 auto; }
+  .topbar { padding: 8px; gap: 6px; }
+  #messages { padding: 16px 10px 8px; }
+  .composer { padding-left: 10px; padding-right: 10px; }
+  #statsToggle .lbl { display: none; }
 }
 </style>
 </head>
 <body>
-<aside>
-  <header>
-    <h1>ai-swap <span id="ver" style="font-weight:400;font-size:12px;color:var(--muted)"></span></h1>
-  </header>
-  <div class="side-title">Models</div>
-  <div id="modelList"></div>
-  <div class="side-title">Chats <button class="small" id="newChat" title="New chat">+ New</button></div>
-  <div id="chats"></div>
-  <div id="nodes"></div>
+<aside id="side" aria-label="Models and chats">
+  <div class="side-head">
+    <h1>ai-swap <span id="ver"></span></h1>
+    <button class="ghost small close-btn" data-close aria-label="Close menu">✕</button>
+  </div>
+  <div class="filter">
+    <label class="sr-only" for="filter">Filter models</label>
+    <input id="filter" type="search" placeholder="Filter models" autocomplete="off" spellcheck="false">
+    <kbd aria-hidden="true">/</kbd>
+  </div>
+  <div id="modelList" role="list" aria-label="Models"></div>
+  <div class="side-title">Chats <button class="small" id="newChat" title="New chat (Ctrl+Shift+O)">+ New</button></div>
+  <div id="chatList" role="list" aria-label="Chats"></div>
 </aside>
+
 <main>
+  <div id="offline" class="hidden" role="status">Can't reach ai-swap. Retrying…</div>
   <div class="topbar">
-    <button class="small" id="sideToggle" title="Models and chats">☰</button>
-    <select id="model" aria-label="Model"></select>
-    <span id="modelState"></span>
+    <button class="small" id="sideToggle" aria-label="Open models and chats">☰</button>
+    <button class="chip" id="chip" title="Change model">
+      <span class="dot" id="chipDot"></span><span class="cname" id="chipName">No model</span><span class="cstate" id="chipState"></span>
+    </button>
     <span class="spacer"></span>
-    <button class="small" id="tabChat">Chat</button>
-    <button class="small" id="tabModels">Models</button>
-    <button class="small" id="statsToggle" title="Show or hide model stats">Stats</button>
+    <div class="seg" role="tablist" aria-label="View">
+      <button role="tab" id="tabChat" aria-selected="true" aria-controls="view-chat">Chat</button>
+      <button role="tab" id="tabModels" aria-selected="false" aria-controls="view-models">Models</button>
+    </div>
+    <button class="small" id="statsToggle" aria-pressed="true" aria-controls="stats" title="Model stats"><span aria-hidden="true">ⓘ</span> <span class="lbl">Stats</span></button>
   </div>
 
-  <section id="view-chat">
+  <section id="view-chat" role="tabpanel" aria-labelledby="tabChat">
     <div id="messages"></div>
     <div class="composer">
-      <form id="form">
-        <textarea id="input" rows="3" placeholder="Message (Enter to send, Shift+Enter for newline)"></textarea>
-        <button class="primary" id="send" type="submit">Send</button>
-      </form>
+      <div class="inner">
+        <div id="notice" class="hidden"></div>
+        <form id="form">
+          <textarea id="input" rows="3" aria-label="Message" placeholder="Message…"></textarea>
+          <button class="primary" id="send" type="submit">Send</button>
+        </form>
+        <div class="hint">Enter to send · Shift+Enter for a new line · Esc to stop</div>
+      </div>
     </div>
   </section>
 
-  <section id="view-models" class="hidden">
-    <table>
-      <thead><tr><th>Model</th><th>Node</th><th>Engine</th><th>State</th><th>Memory</th><th></th></tr></thead>
-      <tbody id="modelRows"></tbody>
+  <section id="view-models" class="hidden" role="tabpanel" aria-labelledby="tabModels">
+    <table class="fleet">
+      <thead><tr><th>Model</th><th>State</th><th>Memory</th><th>Engine</th><th></th></tr></thead>
+      <tbody id="fleetRows"></tbody>
     </table>
-    <div id="logs"></div>
   </section>
 </main>
-<aside id="statsPane" aria-label="Model stats"><div class="note" style="margin-top:16px">Pick a model to see its stats.</div></aside>
+
+<aside id="stats" aria-label="Model stats"><div class="note" style="margin-top:16px">Pick a model to see its stats.</div></aside>
+<div id="backdrop"></div>
+<dialog id="logs" aria-labelledby="logTitle">
+  <div class="dlg-head"><b id="logTitle">Logs</b><label><input type="checkbox" id="logFollow" checked> Follow</label><button class="small" id="logClose">Close</button></div>
+  <pre id="logText"></pre>
+</dialog>
+<div id="toast" aria-live="polite"></div>
+<div id="live" class="sr-only" aria-live="polite"></div>
 
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+  set(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); return true; }
+    catch { if (!store.warned) { store.warned = true; toast("Couldn't save chats: browser storage is full. Delete some old chats.", "bad", 8000); } return false; }
+  },
 };
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+const coarse = matchMedia("(pointer: coarse)").matches;
+const narrow = () => matchMedia("(max-width: 760px)").matches;
+const statsOverlay = () => matchMedia("(max-width: 1100px)").matches;
+
+// ---- state ---------------------------------------------------------------
 
 let chats = store.get("aiswap.chats", []);
 let currentId = store.get("aiswap.current", null);
-let models = [];
-let status = null;
-let abort = null;
+let selected = store.get("aiswap.model", "");
+let models = [];       // /v1/models entries: routable ids
+let status = null;     // /api/status
+let fleet = [], nodes = [];
+let abort = null, streaming = null; // streaming = { chatId, reply }
+let failures = 0;
+const collapsed = new Set(store.get("aiswap.collapsed", []));
+const pending = new Map();        // model id -> "load" | "unload" while a request runs
+const startingSince = new Map();  // model id -> ms timestamp first seen starting
 
-const stateColor = { ready: "var(--ok)", starting: "var(--warn)", stopping: "var(--warn)", failed: "var(--bad)", stopped: "var(--muted)" };
+// Replies interrupted by a reload or closed tab: keep what arrived, say so.
+for (const c of chats) for (const m of c.messages) {
+  if (!m.streaming) continue;
+  delete m.streaming; delete m.phase; delete m.tThink0;
+  if (!m.content && !m.thinking) m.error = "Interrupted: the page was closed during this reply.";
+  else m.meta = [m.meta, "interrupted"].filter(Boolean).join(" · ");
+}
 
 function current() { return chats.find(c => c.id === currentId); }
 function save() { store.set("aiswap.chats", chats); store.set("aiswap.current", currentId); }
-
-// crypto.randomUUID only exists in secure contexts (HTTPS or localhost), and
-// the UI is usually opened over plain http from another machine.
 function newId() {
+  // crypto.randomUUID only exists in secure contexts; the UI is usually plain http on a LAN.
   if (crypto.randomUUID) return crypto.randomUUID();
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
 }
+function info(id) { return fleet.find(m => m.id === id); }
 
-function newChat() {
-  const c = { id: newId(), title: "New chat", model: $("model").value, messages: [] };
-  chats.unshift(c); currentId = c.id; save(); render();
-  $("input").focus();
+// setHTML only touches the DOM when the markup changed, and puts keyboard
+// focus back on the element with the same data-k afterwards, so the 3-second
+// poll never yanks focus or closes things.
+function setHTML(el, html) {
+  if (el._html === html) return;
+  const a = document.activeElement;
+  const key = a && el.contains(a) ? a.dataset.k : null;
+  el.innerHTML = html; el._html = html;
+  if (key) el.querySelector(`[data-k="${CSS.escape(key)}"]`)?.focus({ preventScroll: true });
 }
 
-// ---- rendering ---------------------------------------------------------
+function toast(msg, kind = "", ms = 4000, action) {
+  const t = document.createElement("div");
+  t.className = "toast " + kind; t.setAttribute("role", kind === "bad" ? "alert" : "status");
+  t.innerHTML = `<span>${esc(msg)}</span>`;
+  if (action) {
+    const b = document.createElement("button"); b.textContent = action.label;
+    b.onclick = () => { action.run(); t.remove(); }; t.appendChild(b);
+  }
+  $("toast").appendChild(t);
+  setTimeout(() => t.remove(), ms);
+}
 
-function esc(s) { return s.replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch])); }
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  // navigator.clipboard needs a secure context; fall back for plain http.
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand("copy"); } catch {}
+  ta.remove(); return ok;
+}
 
-// Minimal markdown: fenced code, inline code, bold, paragraphs.
+// ---- markdown ------------------------------------------------------------
+// Escape first, then add a small, safe subset: headings, lists, tables,
+// quotes, rules, fenced code, inline code, links (http/https only), bold,
+// italics, strikethrough.
+
+function inline(s) {
+  const codes = [];
+  s = esc(s).replace(/`([^`\n]+)`/g, (_, c) => { codes.push(c); return `\u0000${codes.length - 1}\u0000`; });
+  s = s
+    .replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/(^|[\s(])(https?:\/\/[^\s<)]+[^\s<).,;:!?'"])/g, '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>')
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/__([^_\n]+)__/g, "<strong>$1</strong>")
+    .replace(/(^|[^*\w])\*([^*\s][^*\n]*?)\*(?!\w)/g, "$1<em>$2</em>")
+    .replace(/(^|[^_\w])_([^_\s][^_\n]*?)_(?!\w)/g, "$1<em>$2</em>")
+    .replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[i]}</code>`);
+}
+
+const reList = /^(\s*)([-*+]|\d{1,9}[.)])\s+(.*)$/;
+const reTableSep = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const isBlockStart = (l) => /^\s*(#{1,6}\s|>|```|~~~)/.test(l) || reList.test(l) || /^\s*([-*_])(\s*\1){2,}\s*$/.test(l);
+const cells = (l) => l.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+
 function md(src) {
-  const parts = src.split(/```/);
-  return parts.map((p, i) => {
-    if (i % 2 === 1) {
-      const nl = p.indexOf("\n");
-      const code = nl >= 0 ? p.slice(nl + 1) : p;
-      return "<pre><code>" + esc(code.replace(/\n$/, "")) + "</code></pre>";
+  const lines = String(src).replace(/\r/g, "").split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const l = lines[i];
+    const fence = l.match(/^\s*(```+|~~~+)\s*([\w#+.-]*)/);
+    if (fence) {
+      const buf = []; i++;
+      while (i < lines.length && !lines[i].trim().startsWith(fence[1])) buf.push(lines[i++]);
+      i++;
+      const lang = fence[2] || "";
+      out.push(`<div class="code"><div class="code-head"><span>${esc(lang || "code")}</span><span><button class="ghost" data-code="wrap" title="Wrap long lines">Wrap</button><button class="ghost" data-code="copy">Copy</button></span></div><pre><code>${esc(buf.join("\n"))}</code></pre></div>`);
+      continue;
     }
-    return p.split(/\n{2,}/).filter(x => x.trim()).map(para =>
-      "<p>" + esc(para)
-        .replace(/`([^`]+)`/g, "<code>$1</code>")
-        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/\n/g, "<br>") + "</p>").join("");
-  }).join("");
+    if (!l.trim()) { i++; continue; }
+    let m;
+    if ((m = l.match(/^\s*(#{1,6})\s+(.*?)\s*#*\s*$/))) { out.push(`<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`); i++; continue; }
+    if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { out.push("<hr>"); i++; continue; }
+    if (/^\s*>/.test(l)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) buf.push(lines[i++].replace(/^\s*>\s?/, ""));
+      out.push(`<blockquote>${md(buf.join("\n"))}</blockquote>`);
+      continue;
+    }
+    if (l.includes("|") && i + 1 < lines.length && reTableSep.test(lines[i + 1]) && cells(lines[i + 1]).length === cells(l).length) {
+      const head = cells(l), align = cells(lines[i + 1]).map(c => c.endsWith(":") ? (c.startsWith(":") ? "center" : "right") : "");
+      i += 2;
+      const body = [];
+      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) body.push(cells(lines[i++]));
+      const td = (tag, c, j) => `<${tag}${align[j] ? ` style="text-align:${align[j]}"` : ""}>${inline(c)}</${tag}>`;
+      out.push(`<table><thead><tr>${head.map((c, j) => td("th", c, j)).join("")}</tr></thead><tbody>${body.map(r => `<tr>${r.map((c, j) => td("td", c, j)).join("")}</tr>`).join("")}</tbody></table>`);
+      continue;
+    }
+    if (reList.test(l)) { const [html, next] = list(lines, i); out.push(html); i = next; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !(para.length && isBlockStart(lines[i]))) para.push(lines[i++]);
+    out.push(`<p>${para.map(inline).join("<br>")}</p>`);
+  }
+  return out.join("");
+}
+
+function list(lines, start) {
+  const first = lines[start].match(reList);
+  const base = first[1].length, ordered = /\d/.test(first[2]);
+  const sameKind = (mm) => mm && mm[1].length === base && /\d/.test(mm[2]) === ordered;
+  const items = [];
+  let i = start;
+  while (i < lines.length) {
+    const l = lines[i];
+    if (!l.trim()) {
+      let j = i + 1; while (j < lines.length && !lines[j].trim()) j++;
+      if (j < lines.length && (lines[j].match(/^(\s*)/)[1].length > base || sameKind(lines[j].match(reList)))) { i = j; continue; }
+      break;
+    }
+    const m = l.match(reList);
+    const indent = l.match(/^(\s*)/)[1].length;
+    if (m && indent === base) { if (!sameKind(m)) break; items.push({ text: m[3], sub: [] }); i++; continue; }
+    if (indent > base && items.length) { items[items.length - 1].sub.push(l.slice(Math.min(indent, base + 2))); i++; continue; }
+    if (!m && indent <= base && items.length && !isBlockStart(l) && (lines[i - 1] || "").trim()) { items[items.length - 1].text += "\n" + l.trim(); i++; continue; }
+    break;
+  }
+  const n0 = ordered ? parseInt(first[2], 10) : 1;
+  const tag = ordered ? "ol" : "ul";
+  return [`<${tag}${ordered && n0 !== 1 ? ` start="${n0}"` : ""}>${items.map(it =>
+    `<li>${it.text.split("\n").map(inline).join("<br>")}${it.sub.length ? md(it.sub.join("\n")) : ""}</li>`).join("")}</${tag}>`, i];
+}
+
+// ---- fleet: models joined with node status --------------------------------
+
+function buildFleet() {
+  nodes = []; fleet = [];
+  if (!status) return;
+  const addNode = (name, local, online, n, err) => nodes.push({
+    name, local, online, error: err, budget: n?.memory_budget_gb || 0, used: n?.memory_used_gb || 0, models: n?.models || [],
+  });
+  addNode(status.node.name, true, true, status.node);
+  for (const p of status.peers || []) addNode(p.name, false, !!(p.online && p.node), p.node, p.error);
+  const now = Date.now();
+  for (const nd of nodes) for (const m of nd.models) {
+    if (!m.runnable) continue;
+    const routed = models.find(x => x.node === nd.name && (x.id === m.name || x.id === m.name + "@" + nd.name));
+    const id = routed ? routed.id : (nd.local ? m.name : m.name + "@" + nd.name);
+    if (m.state === "starting") { if (!startingSince.has(id)) startingSince.set(id, now); } else if (!pending.has(id)) startingSince.delete(id);
+    fleet.push({ ...m, id, node: nd.name, local: nd.local });
+  }
+  if (!selected || !fleet.some(m => m.id === selected)) {
+    const pick = fleet.find(m => m.state === "ready") || fleet.find(m => m.resident) || fleet[0];
+    if (pick) selected = pick.id;
+  }
+}
+
+function stateWord(m) {
+  const p = pending.get(m.id);
+  if (p === "unload" || m.state === "stopping") return { text: "unloading", cls: "" };
+  if (m.state === "starting" || p === "load") {
+    const since = startingSince.get(m.id);
+    return { text: "loading" + (since ? " " + Math.round((Date.now() - since) / 1000) + "s" : ""), cls: "" };
+  }
+  if (m.state === "ready") return { text: m.inflight ? "busy" : "loaded", cls: m.inflight ? "" : "quiet" };
+  if (m.state === "failed") return { text: "failed", cls: "bad" };
+  return { text: "", cls: "" };
+}
+const isUp = (m) => !!m && (m.state === "ready" || m.state === "starting");
+
+// ---- sidebar -----------------------------------------------------------
+
+function renderModelList() {
+  const q = $("filter").value.trim().toLowerCase();
+  const multi = nodes.length > 1;
+  let html = "";
+  for (const nd of nodes) {
+    const list = fleet.filter(m => m.node === nd.name && (!q || m.id.toLowerCase().includes(q)))
+      .sort((a, b) => (isUp(b) - isUp(a)) || a.name.localeCompare(b.name));
+    if (q && !list.length) continue;
+    const open = !!q || !collapsed.has(nd.name);
+    const pct = nd.budget ? Math.min(100, 100 * nd.used / nd.budget) : 0;
+    html += `<button class="node-head" data-node="${esc(nd.name)}" data-k="node:${esc(nd.name)}" aria-expanded="${open}" title="${esc(nd.name)}${nd.online ? "" : ": offline"}">
+      <span class="caret" aria-hidden="true">▾</span><span class="nname">${esc(nd.name)}</span>
+      ${nd.online ? `<span class="nmem">${nd.used.toFixed(0)} / ${nd.budget ? nd.budget.toFixed(0) : "∞"} GB</span>
+      <span></span><span class="bar" aria-hidden="true"><div style="width:${pct}%"></div></span>` : `<span class="node-off">offline</span>`}</button>`;
+    if (!open) continue;
+    if (!nd.online) { html += `<div class="side-empty">${esc(nd.error || "Not reachable")}</div>`; continue; }
+    for (const m of list) {
+      const w = stateWord(m), p = pending.get(m.id);
+      const act = p ? (p === "load" ? "Loading…" : "Unloading…") : isUp(m) ? "Unload" : "Load";
+      const name = multi ? m.name : m.id;
+      html += `<div class="model-li${m.id === selected ? " active" : ""}" role="listitem">
+        <button class="model-row" data-model="${esc(m.id)}" data-k="m:${esc(m.id)}" tabindex="${m.id === selected ? 0 : -1}" aria-current="${m.id === selected}" title="${esc(m.id)} on ${esc(m.node)}">
+          <span class="dot ${esc(m.state)}" aria-hidden="true"></span><span class="mname">${esc(name)}</span>
+          ${m.resident ? `<span class="pill" title="Kept loaded by default; gives way when another model needs the memory">resident</span>` : ""}
+          ${w.text ? `<span class="state ${w.cls}">${esc(w.text)}</span>` : ""}
+        </button>
+        <button class="small row-act${p ? " pending" : ""}" tabindex="-1" data-act="${isUp(m) ? "unload" : "load"}" data-ref="${esc(m.id)}" ${p ? "disabled" : ""} aria-label="${act} ${esc(m.id)}">${act}</button>
+      </div>`;
+    }
+  }
+  if (!html) html = `<div class="side-empty">${status ? (q ? "No models match." : "No models configured.") : "Connecting…"}</div>`;
+  setHTML($("modelList"), html);
 }
 
 function renderChats() {
-  $("chats").innerHTML = "";
-  for (const c of chats) {
-    const el = document.createElement("div");
-    el.className = "chat-item" + (c.id === currentId ? " active" : "");
-    el.innerHTML = `<span>${esc(c.title)}</span><button class="del" title="Delete">✕</button>`;
-    el.onclick = () => { currentId = c.id; if (c.model && models.some(m => m.id === c.model)) $("model").value = c.model; save(); render(); };
-    el.querySelector(".del").onclick = (e) => {
-      e.stopPropagation();
-      chats = chats.filter(x => x.id !== c.id);
-      if (currentId === c.id) currentId = chats[0]?.id ?? null;
-      save(); render();
-    };
-    $("chats").appendChild(el);
-  }
+  const html = chats.map(c => `<div class="chat-li${c.id === currentId ? " active" : ""}" role="listitem">
+      <button class="chat-open" data-chat="${esc(c.id)}" data-k="c:${esc(c.id)}" aria-current="${c.id === currentId}">
+        <span class="ctitle">${esc(c.title)}</span>${c.model ? `<span class="cmodel">${esc(c.model)}</span>` : ""}</button>
+      <button class="chat-del" data-del="${esc(c.id)}" data-k="d:${esc(c.id)}" aria-label="Delete chat ${esc(c.title)}" title="Delete">✕</button></div>`).join("")
+    || `<div class="side-empty">No chats yet.</div>`;
+  setHTML($("chatList"), html);
 }
 
-function msgEl(m) {
+// ---- top bar, notice, empty state ----------------------------------------
+
+function renderTop() {
+  const m = info(selected);
+  $("chipDot").className = "dot " + (m ? m.state : "stopped");
+  $("chipName").textContent = m ? m.id : (status ? "No model" : "Connecting…");
+  let st = "";
+  if (m) {
+    const w = stateWord(m);
+    st = w.text || (m.state === "stopped" ? "not loaded" : m.state);
+    if (m.resident) st += " · resident";
+    if (nodes.length > 1) st += " · " + m.node;
+  }
+  $("chipState").textContent = st;
+  $("chip").setAttribute("aria-label", `Model: ${m ? m.id + ", " + st : "none"}. Change model`);
+  document.title = (streaming ? "● " : "") + (m ? m.id + " – " : "") + "ai-swap";
+  renderNotice();
+}
+
+// What sending will do, when the selected model isn't loaded yet.
+function renderNotice() {
+  const n = $("notice"), m = info(selected);
+  if (!m || m.state === "ready" || streaming) { n.classList.add("hidden"); n.innerHTML = ""; return; }
+  const nd = nodes.find(x => x.name === m.node);
+  let html;
+  if (m.state === "starting" || pending.get(m.id) === "load") {
+    html = `<span class="ico">◌</span><span><b>${esc(m.id)}</b> is ${esc(stateWord(m).text)}. You can send now; the reply starts once it's ready.</span>`;
+  } else {
+    const loaded = (nd?.models || []).filter(x => x.name !== m.name && (x.state === "ready" || x.state === "starting"));
+    const evict = [];
+    if (nd && nd.budget > 0) {
+      let used = loaded.reduce((t, x) => t + (x.memory_gb || 0), 0);
+      for (const x of loaded.slice().sort((a, b) => Date.parse(a.last_used || 0) - Date.parse(b.last_used || 0))) {
+        if (used + (m.memory_gb || 0) <= nd.budget) break;
+        evict.push(x); used -= x.memory_gb || 0;
+      }
+    }
+    const t = m.load_seconds ? `about ${Math.round(m.load_seconds)} s last time` : "can take a minute";
+    html = `<span class="ico">⚠︎</span><span>Sending will load <b>${esc(m.id)}</b> (${m.memory_gb ? "~" + m.memory_gb + " GB, " : ""}${t})` +
+      (evict.length ? ` and unload ${evict.map(x => `<b>${esc(x.name)}</b>${x.resident ? " (resident; it comes back when the GPU is free)" : ""}`).join(", ")}` : "") + ".</span>";
+  }
+  if (n.innerHTML !== html) n.innerHTML = html;
+  n.classList.remove("hidden");
+}
+
+// ---- messages --------------------------------------------------------------
+
+function msgEl(m, idx) {
   const el = document.createElement("div");
-  el.className = "msg " + m.role + (m.error ? " error" : "");
-  const who = m.role === "user" ? "You" : (m.model || "assistant");
-  let inner = "";
-  if (m.thinking) inner += `<details class="thinking"${m.content ? "" : " open"}><summary>Thinking</summary><div>${esc(m.thinking)}</div></details>`;
-  inner += m.role === "user" ? esc(m.content) : md(m.content || (m.thinking ? "" : "…"));
-  el.innerHTML = `<div class="role">${esc(who)}</div><div class="body">${inner}</div>` +
-    (m.meta ? `<div class="meta">${esc(m.meta)}</div>` : "");
+  el.className = "msg " + m.role;
+  el.dataset.i = idx;
+  if (m.role === "user") {
+    el.innerHTML = `<div class="role">You</div><div class="body"></div>
+      <div class="meta"><span class="acts"><button class="ghost" data-msg="copy">Copy</button><button class="ghost" data-msg="edit">Edit</button></span></div>`;
+    el.querySelector(".body").textContent = m.content;
+    return el;
+  }
+  el.innerHTML = `<div class="role"></div><div class="body"><details class="thinking hidden"><summary></summary><div class="think-text"></div></details><div class="content"></div><div class="err"></div></div>
+    <div class="meta"><span class="mtext"></span><span class="acts"><button class="ghost" data-msg="copy">Copy</button><button class="ghost" data-msg="retry">Retry</button></span></div>`;
+  el.querySelector(".role").textContent = m.model || "assistant";
+  // Remember the user's own open/closed choice; our updates don't count.
+  el.querySelector("summary").addEventListener("click", () => {
+    const det = el.querySelector("details");
+    m.thinkOpen = !det.open;
+  });
+  fillAssistant(el, m);
   return el;
 }
 
+function fillAssistant(el, m) {
+  const live = !!streaming && streaming.reply === m;
+  const det = el.querySelector("details");
+  if (m.thinking) {
+    det.classList.remove("hidden");
+    const secs = m.thinkSecs ?? (live && m.tThink0 ? (Date.now() - m.tThink0) / 1000 : 0);
+    const label = live && !m.content ? `Thinking… ${Math.round(secs)}s` : secs ? `Thought for ${Math.round(secs)}s` : "Thinking";
+    const sum = det.querySelector("summary");
+    if (sum.textContent !== label) sum.textContent = label;
+    const tt = det.querySelector(".think-text");
+    const stick = tt.scrollTop + tt.clientHeight >= tt.scrollHeight - 8;
+    if (tt.textContent !== m.thinking) { tt.textContent = m.thinking; if (stick) tt.scrollTop = tt.scrollHeight; }
+    const want = m.thinkOpen ?? (live && !m.content);
+    if (det.open !== want) det.open = want;
+  }
+  const c = el.querySelector(".content");
+  let html;
+  if (m.content) html = md(m.content);
+  else if (live && !m.thinking) html = `<span class="waiting">${esc(m.phase || "Waiting for the model…")}</span>`;
+  else if (!m.thinking && !m.error && !live) html = `<span class="waiting">(empty reply)</span>`;
+  else html = "";
+  if (c._html !== html) { c.innerHTML = html; c._html = html; }
+  el.querySelector(".err").textContent = m.error ? "Error: " + m.error : "";
+  el.querySelector(".mtext").textContent = m.meta || "";
+  el.querySelector('[data-msg="retry"]').classList.toggle("hidden", live);
+  el.querySelector('[data-msg="copy"]').classList.toggle("hidden", !m.content);
+}
+
 function renderMessages() {
-  const box = $("messages");
-  const c = current();
+  const box = $("messages"), c = current();
   box.innerHTML = "";
-  if (!c || c.messages.length === 0) {
-    box.innerHTML = `<div class="empty">Pick a model and start typing.<br>Models load on first use; big ones can take a minute.</div>`;
+  if (!c || !c.messages.length) {
+    const m = info(selected);
+    box.innerHTML = `<div class="empty">${m
+      ? `Chatting with <b>${esc(m.id)}</b>${m.state === "ready" ? ", loaded and ready." : m.state === "starting" ? ", which is loading now." : `. It isn't loaded yet; your first message loads it${m.load_seconds ? ` (about ${Math.round(m.load_seconds)} s last time)` : ""}.`}<br><br>Pick a different model on the left any time.`
+      : status ? "Pick a model on the left to start." : "Connecting to ai-swap…"}</div>`;
     return;
   }
-  for (const m of c.messages) box.appendChild(msgEl(m));
+  c.messages.forEach((m, i) => box.appendChild(msgEl(m, i)));
+  box.lastElementChild?.classList.add("last");
   box.scrollTop = box.scrollHeight;
 }
 
-function renderModelSelect() {
-  const sel = $("model");
-  const prev = sel.value || current()?.model || store.get("aiswap.model", "");
-  sel.innerHTML = "";
-  for (const m of models) {
-    const o = document.createElement("option");
-    o.value = m.id;
-    o.textContent = `${m.id}  ·  ${m.node}  ·  ${m.status}`;
-    sel.appendChild(o);
+function render() { renderChats(); renderModelList(); renderTop(); renderMessages(); }
+
+// ---- models table ----------------------------------------------------------
+
+function renderFleet() {
+  if ($("view-models").classList.contains("hidden")) return;
+  const multi = nodes.length > 1;
+  let html = "";
+  for (const nd of nodes) {
+    if (multi) html += `<tr class="node-row"><td colspan="5">${esc(nd.name)} ${nd.online ? `· ${nd.used.toFixed(0)} / ${nd.budget ? nd.budget.toFixed(0) : "∞"} GB` : "· offline"}</td></tr>`;
+    for (const m of fleet.filter(x => x.node === nd.name)) {
+      const w = stateWord(m), p = pending.get(m.id), up = isUp(m);
+      html += `<tr>
+        <td>${esc(m.name)} ${m.resident ? `<span class="pill">resident</span>` : ""}${m.aliases?.length ? `<div class="sub">${esc(m.aliases.join(", "))}</div>` : ""}</td>
+        <td class="nw"><span class="state"><span class="dot ${esc(m.state)}"></span>${esc(w.text || (m.state === "stopped" ? "not loaded" : m.state))}</span>${m.error ? `<div class="errtxt">${esc(m.error)}</div>` : ""}</td>
+        <td class="nw">${m.memory_gb ? m.memory_gb + " GB" : "—"}</td>
+        <td class="nw">${esc(m.engine)}</td>
+        <td class="nw"><button class="small${up ? "" : " primary"}" data-act="${up ? "unload" : "load"}" data-ref="${esc(m.id)}" data-k="t:${esc(m.id)}" ${p ? "disabled" : ""}>${p ? (p === "load" ? "Loading…" : "Unloading…") : up ? "Unload" : "Load"}</button>
+          <button class="small" data-act="logs" data-ref="${esc(m.id)}" data-k="tl:${esc(m.id)}">Logs</button></td></tr>`;
+    }
   }
-  if (models.some(m => m.id === prev)) sel.value = prev;
-  else {
-    const loaded = models.find(m => m.status === "ready") || models.find(m => m.status === "starting");
-    if (loaded) sel.value = loaded.id;
-  }
-  updateModelState();
+  setHTML($("fleetRows"), html || `<tr><td colspan="5">No models.</td></tr>`);
 }
 
-// ---- load / unload ------------------------------------------------------
-
-const pending = new Map(); // model id -> "load" | "unload" while a request is in flight
-
-// actionFor says which control a model should offer in its current state.
-function actionFor(id, state) {
-  const p = pending.get(id);
-  if (p) return { act: p, pending: true, label: p === "load" ? "Loading…" : "Stopping…" };
-  const up = state === "ready" || state === "starting";
-  return { act: up ? "unload" : "load", pending: false, label: up ? "Unload" : "Load" };
-}
+// ---- load / unload / logs ----------------------------------------------------
 
 async function modelAction(id, act) {
   if (pending.has(id)) return;
+  const m = info(id);
+  if (act === "unload" && m?.resident && !confirm(`${m.name} is this machine's resident model.\n\nUnloaded by hand, it stays unloaded until something uses it again. Unload it?`)) return;
   pending.set(id, act);
-  renderModelList();
-  const sb = $("model").value === id && $("statsPane").querySelector('.actions [data-act="load"], .actions [data-act="unload"]');
-  if (sb) { sb.disabled = true; sb.textContent = actionFor(id).label; }
-  // Show the "starting"/"stopping" state while the (possibly long) request runs.
+  if (act === "load") startingSince.set(id, Date.now());
+  paintFleetViews();
   const poll = setTimeout(refresh, 400);
   try {
     const r = await fetch(`/api/models/${encodeURIComponent(id)}/${act}`, { method: "POST" });
-    if (!r.ok) alert(`${act === "load" ? "Load" : "Unload"} ${id} failed: ` + ((await r.json().catch(() => ({}))).error || r.statusText));
+    if (!r.ok) toast(`${act === "load" ? "Loading" : "Unloading"} ${id} failed: ${(await r.json().catch(() => ({}))).error || r.statusText}`, "bad", 8000);
   } catch (e) {
-    alert(`${act} ${id} failed: ${e.message}`);
+    toast(`${act === "load" ? "Loading" : "Unloading"} ${id} failed: ${e.message}`, "bad", 8000);
   } finally {
-    clearTimeout(poll);
-    pending.delete(id);
-    refresh();
+    clearTimeout(poll); pending.delete(id); refresh();
   }
 }
 
-// Sidebar model list, grouped by node; clicking one switches the chat to it.
-function renderModelList() {
-  const resident = new Set();
-  if (status) {
-    status.node.models.forEach(m => m.resident && resident.add(m.name + "@" + status.node.name));
-    status.peers.forEach(p => p.node?.models.forEach(m => m.resident && resident.add(m.name + "@" + p.name)));
-  }
-  const byNode = new Map();
-  for (const m of models) {
-    if (!byNode.has(m.node)) byNode.set(m.node, []);
-    byNode.get(m.node).push(m);
-  }
-  const selected = $("model").value;
-  let html = "";
-  for (const [node, list] of byNode) {
-    if (byNode.size > 1) html += `<div class="model-node">${esc(node)}</div>`;
-    for (const m of list) {
-      const tags = [];
-      if (resident.has(m.id.split("@")[0] + "@" + m.node)) tags.push("resident");
-      if (m.status === "starting") tags.push("loading");
-      if (m.status === "failed") tags.push("failed");
-      const act = actionFor(m.id, m.status);
-      html += `<div class="model-item${m.id === selected ? " active" : ""}" role="button" tabindex="0" data-model="${esc(m.id)}" title="${esc(m.id)} on ${esc(m.node)}: ${esc(m.status)}">
-        <span class="dot" style="background:${stateColor[m.status] || "var(--muted)"}"></span>
-        <span class="mname">${esc(m.id)}</span>${tags.map(t => `<span class="tag">${t}</span>`).join("")}
-        <button class="mact${act.pending ? " pending" : ""}" data-act="${act.act}" data-ref="${esc(m.id)}" title="${act.label}" aria-label="${act.label} ${esc(m.id)}" ${act.pending ? "disabled" : ""}>${act.pending ? "…" : act.act === "load" ? "▶" : "■"}</button></div>`;
+let logFor = "", logTimer = 0;
+async function openLogs(id) {
+  logFor = id;
+  $("logTitle").textContent = "Logs · " + id;
+  $("logText").textContent = "Loading…";
+  if (!$("logs").open) $("logs").showModal();
+  await pullLogs();
+  clearInterval(logTimer);
+  logTimer = setInterval(pullLogs, 2000);
+}
+async function pullLogs() {
+  if (!$("logs").open) { clearInterval(logTimer); return; }
+  const pre = $("logText");
+  try {
+    const t = (await (await fetch(`/api/models/${encodeURIComponent(logFor)}/logs`)).text()) || "(no output yet)";
+    if (pre.textContent !== t) {
+      const top = pre.scrollTop;
+      pre.textContent = t;
+      pre.scrollTop = $("logFollow").checked ? pre.scrollHeight : top;
     }
-  }
-  $("modelList").innerHTML = html || `<div class="model-node">no models</div>`;
-  if (!scrolledToModel && models.length) {
-    scrolledToModel = true;
-    $("modelList").querySelector(".model-item.active")?.scrollIntoView({ block: "nearest" });
-  }
-}
-let scrolledToModel = false;
-
-function selectModel(id) {
-  $("model").value = id;
-  $("model").onchange();
-  document.body.classList.remove("show-side");
-  $("input").focus();
+  } catch (e) { pre.textContent = "Couldn't fetch logs: " + e.message; }
 }
 
-function updateModelState() {
-  renderModelList();
-  const m = models.find(x => x.id === $("model").value);
-  $("modelState").innerHTML = m
-    ? `<span class="dot" style="background:${stateColor[m.status] || "var(--muted)"}"></span>${esc(m.engine)} on ${esc(m.node)}`
-    : (models.length ? "" : "no models configured");
+// ---- stats pane --------------------------------------------------------------
+
+const GB = 1024 ** 3;
+const fmtBytes = b => b >= GB ? (b / GB).toFixed(b >= 10 * GB ? 1 : 2) + " GB" : (b / 1024 ** 2).toFixed(0) + " MB";
+const fmtCount = n => n >= 1e9 ? (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n ?? 0);
+const fmtTok = n => n >= 1024 && n % 1024 === 0 ? (n / 1024) + "k" : fmtCount(n);
+const fmtSecs = s => s < 1 ? (s * 1000).toFixed(0) + " ms" : s < 90 ? s.toFixed(1) + " s" : s < 5400 ? (s / 60).toFixed(0) + " min" : (s / 3600).toFixed(1) + " h";
+const fmtTPS = v => v ? v.toFixed(v >= 100 ? 0 : 1) : "—";
+const row = (k, v, title) => v === undefined || v === null || v === "" ? "" : `<dt>${k}</dt><dd${title ? ` title="${esc(title)}"` : ""}>${v}</dd>`;
+function meter(label, used, total, extra) {
+  const pct = total ? Math.min(100, 100 * used / total) : 0;
+  return `<div class="meter"><div class="row"><span>${label}</span><span>${extra ?? `${fmtBytes(used)} / ${fmtBytes(total)}`}</span></div><div class="bar"><div style="width:${pct}%"></div></div></div>`;
+}
+function spark(vals) {
+  if (!vals || vals.length < 2) return "";
+  const max = Math.max(...vals), top = max * 1.1, n = vals.length;
+  const pts = vals.map((v, i) => `${(i / (n - 1) * 100).toFixed(1)},${(31 - v / top * 29).toFixed(1)}`).join(" ");
+  return `<div class="spark-wrap"><span class="smax">max ${fmtTPS(max)}</span><svg viewBox="0 0 100 32" preserveAspectRatio="none" role="img" aria-label="Generation speed over the last ${n} requests, up to ${fmtTPS(max)} tokens per second"><polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg></div>`;
 }
 
-function renderNodes() {
-  if (!status) return;
-  const nodes = [{ name: status.node.name, online: true, node: status.node }, ...status.peers];
-  $("nodes").innerHTML = nodes.map(p => {
-    const n = p.node;
-    if (!p.online || !n) return `<div class="node"><div class="name"><span><span class="dot" style="background:var(--bad)"></span>${esc(p.name)}</span><span>offline</span></div></div>`;
-    const pct = n.memory_budget_gb ? Math.min(100, 100 * n.memory_used_gb / n.memory_budget_gb) : 0;
-    const loaded = n.models.filter(m => m.state === "ready" || m.state === "starting").map(m => m.name).join(", ") || "idle";
-    return `<div class="node"><div class="name"><span><span class="dot" style="background:var(--ok)"></span>${esc(p.name)}</span>
-      <span>${n.memory_used_gb.toFixed(0)}/${n.memory_budget_gb ? n.memory_budget_gb.toFixed(0) : "∞"} GB</span></div>
-      <div class="bar"><div style="width:${pct}%"></div></div>
-      <div style="color:var(--muted);margin-top:3px">${esc(loaded)}</div></div>`;
-  }).join("");
+let statsBusy = false;
+const statsVisible = () => getComputedStyle($("stats")).display !== "none";
+async function refreshStats() {
+  if (statsBusy || !statsVisible() || !selected) return;
+  const id = selected;
+  statsBusy = true;
+  try {
+    const r = await fetch(`/api/models/${encodeURIComponent(id)}/stats`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
+    const d = await r.json();
+    if (selected === id) renderStats(id, d);
+  } catch (e) {
+    if (selected === id) setHTML($("stats"), `${statsHead(id, info(id))}<div class="note bad">Stats unavailable: ${esc(e.message)}</div>`);
+  } finally { statsBusy = false; }
 }
 
-function renderModelTable() {
-  if (!status) return;
-  const rows = [];
-  const add = (node, local, m) => rows.push({ node, local, ...m });
-  status.node.models.forEach(m => add(status.node.name, true, m));
-  status.peers.forEach(p => p.node?.models.forEach(m => add(p.name, false, m)));
-  $("modelRows").innerHTML = rows.map(r => {
-    const ref = r.local ? r.name : `${r.name}@${r.node}`;
-    return `<tr>
-      <td>${esc(r.name)}${r.resident ? ` <span title="Kept loaded by default; gives way to other models when memory is short" style="font-size:11px;padding:1px 6px;border:1px solid var(--muted);border-radius:8px;color:var(--muted)">resident</span>` : ""}${r.aliases?.length ? `<div style="color:var(--muted);font-size:12px">${esc(r.aliases.join(", "))}</div>` : ""}</td>
-      <td>${esc(r.node)}</td><td>${esc(r.engine)}${r.runnable ? "" : " (n/a on this OS)"}</td>
-      <td><span class="dot" style="background:${stateColor[r.state]}"></span>${esc(r.state)}${r.error ? `<div style="color:var(--bad);font-size:12px">${esc(r.error)}</div>` : ""}</td>
-      <td>${r.memory_gb ? r.memory_gb + " GB" : "—"}</td>
-      <td style="white-space:nowrap">
-        <button class="small" data-act="load" data-ref="${esc(ref)}" ${r.runnable ? "" : "disabled"}>Load</button>
-        <button class="small" data-act="unload" data-ref="${esc(ref)}">Unload</button>
-        <button class="small" data-act="logs" data-ref="${esc(ref)}">Logs</button>
-      </td></tr>`;
-  }).join("");
+function statsHead(id, st) {
+  const m = { ...(info(id) || {}), ...(st || {}), id };
+  const p = pending.get(id), up = isUp(m);
+  const w = stateWord(m);
+  const sub = [w.text || (m.state === "stopped" ? "not loaded" : m.state || ""), m.engine && `${m.engine} on ${m.node || status?.node?.name || ""}`].filter(Boolean).join(" · ");
+  return `<div class="st-top"><h2>${esc(id)}</h2><button class="ghost small close-btn" data-close data-k="st-close" aria-label="Close stats" style="margin-top:10px">✕</button></div>
+    <div class="sub"><span class="dot ${esc(m.state || "stopped")}"></span><span>${esc(sub)}</span>${m.resident ? `<span class="pill">resident</span>` : ""}</div>
+    <div class="actions"><button class="small${up ? "" : " primary"}" data-act="${up ? "unload" : "load"}" data-k="st-act" ${p ? "disabled" : ""}>${p ? (p === "load" ? "Loading…" : "Unloading…") : up ? "Unload" : "Load"}</button>
+    <button class="small" data-act="logs" data-k="st-logs">Logs</button></div>`;
 }
 
-function render() { renderChats(); renderMessages(); updateModelState(); }
+function renderStats(id, d) {
+  const st = d.status, c = d.config, b = d.backend || {}, q = d.requests || {}, mt = b.metrics || {};
+  const ready = st.state === "ready", last = q.last;
+  let h = statsHead(id, { ...st, node: d.node });
+  if (st.error) h += `<div class="note bad">${esc(st.error)}</div>`;
 
-// ---- data --------------------------------------------------------------
+  // Headline numbers: generation, prompt processing, time to first token.
+  const ttft = last?.ttft_seconds ? fmtSecs(last.ttft_seconds).split(" ") : null;
+  h += `<div class="kpis">
+    <div class="kpi"><div class="label">Generate</div><div class="big">${fmtTPS(last?.gen_tps)}<small> t/s</small></div><div class="subv">${q.avg_gen_tps ? "avg " + fmtTPS(q.avg_gen_tps) : "&nbsp;"}</div></div>
+    <div class="kpi"><div class="label">Prompt</div><div class="big">${fmtTPS(last?.prompt_tps || q.avg_prompt_tps)}<small> t/s</small></div><div class="subv">${q.avg_prompt_tps ? "avg " + fmtTPS(q.avg_prompt_tps) : "&nbsp;"}</div></div>
+    <div class="kpi"><div class="label">First token</div><div class="big">${ttft ? `${ttft[0]}<small> ${ttft[1]}</small>` : "—"}</div><div class="subv">${q.avg_ttft_seconds ? "avg " + fmtSecs(q.avg_ttft_seconds) : "&nbsp;"}</div></div>
+  </div>`;
+  if (!q.requests) h += `<div class="lastrun">No requests through ai-swap since it started.</div>`;
+  else if (!ready) h += `<div class="lastrun">From the last run; the model isn't loaded now.</div>`;
+  h += spark(q.recent_gen_tps);
+
+  // One line of what the model is.
+  const mods = (b.modalities || []).filter(x => x && x !== "text");
+  const chips = [
+    b.params && fmtCount(b.params) + " params", b.quant, (b.ctx_per_slot || c.ctx) && fmtTok(b.ctx_per_slot || c.ctx) + " ctx",
+    ...mods, b.tools && "tools", (b.speculative || q.draft_accept_rate) && ("spec. decode" + (q.draft_accept_rate ? " " + Math.round(q.draft_accept_rate * 100) + "%" : "")),
+  ].filter(Boolean);
+  if (chips.length) h += `<div class="chips">${chips.map(x => `<span>${esc(x)}</span>`).join("")}</div>`;
+
+  // One memory bar: the main GPU if the OS reports it, else the node's plan.
+  const gpu = (d.gpus || [])[0];
+  if (gpu) h += meter(`GPU memory${gpu.busy_percent !== undefined ? ` · ${gpu.busy_percent}% busy` : ""}`, gpu.vram_used_bytes, gpu.vram_total_bytes);
+  else h += meter("Reserved on " + esc(d.node), c.node_used_gb * GB, (c.node_budget_gb || c.node_used_gb || 1) * GB, `${c.node_used_gb.toFixed(0)} / ${c.node_budget_gb ? c.node_budget_gb.toFixed(0) : "∞"} GB`);
+
+  if (q.requests) h += `<div class="reqline">${q.requests} request${q.requests === 1 ? "" : "s"}${q.errors ? ` (${q.errors} failed)` : ""} · ${fmtCount(q.prompt_tokens)} in / ${fmtCount(q.completion_tokens)} out</div>`;
+  if (last?.gen_tps_source === "measured") h += `<div class="note">Last speed measured from the stream (the engine sent no timings for that request).</div>`;
+
+  // Everything else, collapsed.
+  const up = st.loaded_at ? (Date.now() - Date.parse(st.loaded_at)) / 1000 : 0;
+  const file = b.model_path || c.model;
+  h += `<details class="more" id="statsMore" data-k="st-more"${store.get("aiswap.statsMore", false) ? " open" : ""}><summary>Details</summary>
+    <h3>Requests</h3><dl>
+      ${row("Last request", last ? `${fmtCount(last.prompt_tokens || 0)} in${last.cached_tokens ? ` (${fmtCount(last.cached_tokens)} cached)` : ""} · ${fmtCount(last.completion_tokens || 0)} out` : "none yet")}
+      ${row("Draft acceptance", q.draft_accept_rate ? (q.draft_accept_rate * 100).toFixed(0) + "%" : null, "Speculative decoding: share of drafted tokens the model accepted")}
+    </dl>
+    ${ready && (b.slots || mt.requests_processing !== undefined) ? `<h3>Engine, live</h3>
+      ${mt.kv_cache_usage_ratio !== undefined ? meter("KV cache", mt.kv_cache_usage_ratio, 1, (mt.kv_cache_usage_ratio * 100).toFixed(1) + "%") : ""}<dl>
+      ${row("Slots busy", b.slots ? `${b.slots_busy ?? "?"} / ${b.slots}` : null, "Parallel request slots in the engine")}
+      ${row("Queued", mt.requests_deferred !== undefined ? String(mt.requests_deferred) : null)}
+      ${row("Generated since load", mt.tokens_predicted_total !== undefined ? fmtCount(mt.tokens_predicted_total) : null)}
+      ${row("Engine avg generate", mt.predicted_tokens_seconds ? fmtTPS(mt.predicted_tokens_seconds) + " t/s" : null)}
+      ${row("Engine avg prompt", mt.prompt_tokens_seconds ? fmtTPS(mt.prompt_tokens_seconds) + " t/s" : null)}</dl>` : ""}
+    <h3>Memory</h3><dl>
+      ${row("This model reserves", c.memory_gb + " GB", "memory_gb from the config, used to plan swaps")}
+      ${row("Node", `${c.node_used_gb.toFixed(0)} / ${c.node_budget_gb ? c.node_budget_gb.toFixed(0) : "∞"} GB reserved`)}
+      ${row("Process RSS", d.rss_bytes ? fmtBytes(d.rss_bytes) : null, "Resident memory of the engine process. With a discrete GPU, weights in VRAM are not included.")}
+    </dl>
+    ${(d.gpus || []).map((g, i) => meter(`GPU ${i} VRAM (${fmtBytes(g.vram_total_bytes)})${g.busy_percent !== undefined ? ` · ${g.busy_percent}%` : ""}`, g.vram_used_bytes, g.vram_total_bytes)
+      + (g.gtt_used_bytes > 256 * 1024 ** 2 ? meter(`GPU ${i} system RAM (GTT)`, g.gtt_used_bytes, g.gtt_total_bytes) : "")).join("")}
+    <h3>Model</h3><dl>
+      ${row("Parameters", b.params ? fmtCount(b.params) : null)}
+      ${row("Quantization", b.quant ? esc(b.quant) : null)}
+      ${row("Weights", b.size_bytes ? fmtBytes(b.size_bytes) : null)}
+      ${row("Context / request", b.ctx_per_slot ? fmtTok(b.ctx_per_slot) : (c.ctx ? fmtTok(c.ctx) : null))}
+      ${row("Context total", b.ctx && b.ctx !== b.ctx_per_slot ? fmtTok(b.ctx) : null)}
+      ${row("Trained context", b.ctx_train ? fmtTok(b.ctx_train) : null)}
+      ${row("Inputs", (b.modalities || []).length ? esc(b.modalities.join(", ")) : null)}
+      ${row("Tool calling", b.tools === undefined ? null : b.tools ? "yes" : "no")}
+      ${row("Vocabulary", b.vocab ? fmtCount(b.vocab) : null)}
+      ${row("Embedding dim", b.embed_dim ? String(b.embed_dim) : null)}
+    </dl>${ready ? "" : `<div class="note">Load the model to see what the engine reports about it.</div>`}
+    <h3>Backend</h3><dl>
+      ${row("Engine", esc(st.engine) + (b.build ? ` <span style="color:var(--muted)">${esc(b.build)}</span>` : ""))}
+      ${row("Loaded for", up ? fmtSecs(up) : null)}
+      ${row("Load time", st.load_seconds ? fmtSecs(st.load_seconds) : null, "Process start until the health check passed")}
+      ${row("Idle unload", st.resident ? "never (resident)" : c.ttl_seconds ? "after " + fmtSecs(c.ttl_seconds) : "never")}
+      ${row("Port", st.port ? String(st.port) : null)}
+      ${row("PID", st.pid ? String(st.pid) : null)}
+      ${row("File", file ? `<span title="${esc(file)}">${esc(file.split("/").pop())}</span>` : null)}
+    </dl></details>`;
+  setHTML($("stats"), h);
+}
+
+// ---- data --------------------------------------------------------------------
 
 async function refresh() {
   try {
     const [mr, sr] = await Promise.all([fetch("/v1/models"), fetch("/api/status")]);
-    models = (await mr.json()).data;
+    if (!mr.ok || !sr.ok) throw new Error("bad status");
+    models = (await mr.json()).data || [];
     status = await sr.json();
+    failures = 0; $("offline").classList.add("hidden");
     $("ver").textContent = status.node.version ? "v" + status.node.version : "";
-    renderModelSelect(); renderNodes(); renderModelTable(); refreshStats();
-  } catch (e) { /* server restarting; try again next tick */ }
+    buildFleet();
+    renderModelList(); renderTop(); renderFleet();
+    if (!current() || !current().messages.length) renderMessages();
+    refreshStats();
+  } catch (e) {
+    if (++failures >= 2) $("offline").classList.remove("hidden");
+  }
+}
+function paintFleetViews() {
+  renderModelList(); renderTop(); renderFleet();
+  // Reflect a pending load/unload on the stats button right away; the next stats fetch redraws the rest.
+  const b = $("stats").querySelector('[data-k="st-act"]'), p = pending.get(selected);
+  if (b && p) { b.disabled = true; b.textContent = p === "load" ? "Loading…" : "Unloading…"; }
 }
 
-async function send(text) {
+function selectModel(id, { keepDrawer = false } = {}) {
+  if (!id) return;
+  selected = id;
+  $("filter").value = ""; // show the whole list again once a model is picked
+  store.set("aiswap.model", id);
+  const c = current();
+  if (c && !streaming) { c.model = id; save(); }
+  render();
+  setHTML($("stats"), statsHead(id, info(id)));
+  refreshStats();
+  if (!keepDrawer) closeDrawers();
+  if (!coarse) $("input").focus({ preventScroll: true });
+}
+
+function newChat() {
+  const c = current();
+  if (c && !c.messages.length) { closeDrawers(); $("input").focus(); return; } // reuse an empty chat
+  const n = { id: newId(), title: "New chat", model: selected, messages: [] };
+  chats.unshift(n); currentId = n.id; save(); render(); closeDrawers();
+  $("input").focus();
+}
+
+function deleteChat(id) {
+  const idx = chats.findIndex(c => c.id === id);
+  if (idx < 0) return;
+  if (streaming?.chatId === id) abort?.abort();
+  const [gone] = chats.splice(idx, 1);
+  const wasCurrent = currentId === id;
+  if (wasCurrent) currentId = chats[0]?.id ?? null;
+  save(); render();
+  toast(`Deleted “${gone.title}”`, "", 6000, { label: "Undo", run: () => { chats.splice(idx, 0, gone); if (wasCurrent) currentId = gone.id; save(); render(); } });
+}
+
+// ---- sending -------------------------------------------------------------------
+
+async function send(text, { retry = false } = {}) {
   let c = current();
-  if (!c) { newChat(); c = current(); }
-  const model = $("model").value;
-  if (!model) return;
+  if (!c) { const n = { id: newId(), title: "New chat", model: selected, messages: [] }; chats.unshift(n); currentId = n.id; c = n; }
+  const model = selected;
+  if (!model) { toast("Pick a model first.", "bad"); return; }
   c.model = model;
-  store.set("aiswap.model", model);
-  if (c.messages.length === 0) c.title = text.slice(0, 48);
-  c.messages.push({ role: "user", content: text });
-  const reply = { role: "assistant", model, content: "", thinking: "" };
+  if (!retry) {
+    if (!c.messages.length) c.title = text.replace(/\s+/g, " ").slice(0, 60);
+    c.messages.push({ role: "user", content: text });
+  }
+  const m0 = info(model);
+  const loading = !!m0 && m0.state !== "ready";
+  const reply = { role: "assistant", model, content: "", thinking: "", streaming: true,
+    phase: loading ? `Loading ${model}…` : "Waiting for the first token…" };
   c.messages.push(reply);
+  streaming = { chatId: c.id, reply };
   save(); render();
 
   const box = $("messages");
-  let el = box.lastElementChild;
-  const repaint = () => { const n = msgEl(reply); el.replaceWith(n); el = n; box.scrollTop = box.scrollHeight; };
+  const el = box.lastElementChild;
+  const nearBottom = () => box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  let frame = 0, stick = true, lastSave = Date.now();
+  const paint = () => {
+    frame = 0;
+    if (!el.isConnected) return;
+    fillAssistant(el, reply);
+    if (stick) box.scrollTop = box.scrollHeight;
+  };
+  const schedule = () => { stick = nearBottom(); if (!frame) frame = requestAnimationFrame(paint); };
+  const t0 = performance.now();
+  const ticker = setInterval(() => {
+    if (!reply.content && !reply.thinking) {
+      const s = Math.round((performance.now() - t0) / 1000);
+      reply.phase = loading && info(model)?.state !== "ready" ? `Loading ${model}… ${s}s` : `Waiting for the first token… ${s}s`;
+    }
+    schedule();
+  }, 1000);
 
   abort = new AbortController();
   $("send").textContent = "Stop";
-  const t0 = performance.now();
+  renderTop();
   let tFirst = 0, chunks = 0, usage = null;
   try {
+    const history = c.messages.slice(0, -1).filter(m => !m.error && (m.role === "user" || m.content)).map(m => ({ role: m.role, content: m.content }));
     const res = await fetch("/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: abort.signal,
-      body: JSON.stringify({
-        model, stream: true, stream_options: { include_usage: true },
-        messages: c.messages.slice(0, -1).filter(m => !m.error).map(m => ({ role: m.role, content: m.content })),
-      }),
+      method: "POST", headers: { "Content-Type": "application/json" }, signal: abort.signal,
+      body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, messages: history }),
     });
     if (!res.ok) {
       const j = await res.json().catch(() => ({}));
       throw new Error(j.error?.message || res.statusText);
     }
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
+    const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";
     for (;;) {
       const { value, done } = await reader.read();
@@ -497,167 +1023,63 @@ async function send(text) {
         if (data === "[DONE]") continue;
         let j; try { j = JSON.parse(data); } catch { continue; }
         if (j.usage) usage = j.usage;
+        if (j.error) throw new Error(j.error.message || "stream error");
         const d = j.choices?.[0]?.delta;
         if (!d) continue;
         const think = d.reasoning_content ?? d.reasoning ?? "";
         if (think || d.content) { if (!tFirst) tFirst = performance.now(); chunks++; }
-        reply.thinking += think;
-        reply.content += d.content ?? "";
-        repaint();
+        if (think) { if (!reply.tThink0) reply.tThink0 = Date.now(); reply.thinking += think; }
+        if (d.content) {
+          if (reply.thinking && reply.thinkSecs === undefined) reply.thinkSecs = (Date.now() - reply.tThink0) / 1000;
+          reply.content += d.content;
+        }
+        schedule();
+        if (Date.now() - lastSave > 1500) { save(); lastSave = Date.now(); }
       }
     }
   } catch (e) {
-    if (e.name !== "AbortError") { reply.error = true; reply.content = "Error: " + e.message; }
+    if (e.name === "AbortError") reply.stopped = true;
+    else reply.error = e.message; // keep whatever arrived before the failure
   } finally {
+    clearInterval(ticker);
+    if (frame) cancelAnimationFrame(frame);
+    if (reply.thinking && reply.thinkSecs === undefined && reply.tThink0) reply.thinkSecs = (Date.now() - reply.tThink0) / 1000;
+    delete reply.phase; delete reply.tThink0;
     const secs = (performance.now() - (tFirst || t0)) / 1000;
     const toks = usage?.completion_tokens ?? chunks;
     const parts = [];
     if (tFirst) parts.push(`first token ${((tFirst - t0) / 1000).toFixed(1)}s`);
-    if (toks && secs > 0) parts.push(`${(toks / secs).toFixed(1)} tok/s`);
+    if (toks && secs > 0 && tFirst) parts.push(`${(toks / secs).toFixed(1)} tok/s`);
     if (usage) parts.push(`${usage.prompt_tokens} in / ${usage.completion_tokens} out`);
+    if (reply.stopped) parts.push("stopped");
     reply.meta = parts.join(" · ");
-    repaint(); save();
-    abort = null;
+    streaming = null; abort = null;
+    delete reply.streaming;
+    save();
+    if (el.isConnected) { fillAssistant(el, reply); if (stick) box.scrollTop = box.scrollHeight; }
     $("send").textContent = "Send";
+    $("live").textContent = reply.error ? "Reply failed: " + reply.error : reply.stopped ? "Reply stopped." : "Reply finished.";
+    renderTop(); renderChats();
     refresh();
   }
 }
 
+// ---- drawers and views -------------------------------------------------------------
 
-// ---- stats pane ---------------------------------------------------------
-
-const GB = 1024 ** 3;
-const fmtBytes = b => b >= GB ? (b / GB).toFixed(b >= 10 * GB ? 1 : 2) + " GB" : (b / 1024 ** 2).toFixed(0) + " MB";
-const fmtCount = n => n >= 1e9 ? (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "k" : String(n);
-const fmtTok = n => n >= 1024 && n % 1024 === 0 ? (n / 1024) + "k" : fmtCount(n);
-const fmtSecs = s => s < 1 ? (s * 1000).toFixed(0) + " ms" : s < 90 ? s.toFixed(1) + " s" : s < 5400 ? (s / 60).toFixed(0) + " min" : (s / 3600).toFixed(1) + " h";
-const fmtTPS = v => v ? v.toFixed(1) : "—";
-const row = (k, v, title) => v === undefined || v === null || v === "" ? "" : `<dt>${k}</dt><dd${title ? ` title="${esc(title)}"` : ""}>${v}</dd>`;
-function meter(label, used, total, extra) {
-  const pct = total ? Math.min(100, 100 * used / total) : 0;
-  return `<div class="meter"><div class="row"><span>${label}</span><span>${extra ?? `${fmtBytes(used)} / ${fmtBytes(total)}`}</span></div>
-    <div class="bar"><div style="width:${pct}%"></div></div></div>`;
+function closeDrawers() { document.body.classList.remove("side-open", "stats-open"); syncStatsToggle(); }
+function syncStatsToggle() {
+  $("statsToggle").setAttribute("aria-pressed", String(statsOverlay() ? document.body.classList.contains("stats-open") : !document.body.classList.contains("no-stats")));
 }
-function spark(vals) {
-  if (!vals || vals.length < 2) return "";
-  const max = Math.max(...vals) * 1.1, n = vals.length;
-  const pts = vals.map((v, i) => `${(i / (n - 1) * 100).toFixed(1)},${(30 - v / max * 28).toFixed(1)}`).join(" ");
-  return `<svg class="spark" viewBox="0 0 100 32" preserveAspectRatio="none" aria-label="recent generation speed">
-    <polyline points="${pts}" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+function showView(which) {
+  const isModels = which === "models";
+  $("view-models").classList.toggle("hidden", !isModels);
+  $("view-chat").classList.toggle("hidden", isModels);
+  $("tabChat").setAttribute("aria-selected", String(!isModels));
+  $("tabModels").setAttribute("aria-selected", String(isModels));
+  if (isModels) { $("fleetRows")._html = null; renderFleet(); } else renderMessages();
 }
 
-let statsBusy = false, statsFor = "";
-async function refreshStats() {
-  if (statsBusy || getComputedStyle($("statsPane")).display === "none") return;
-  const id = $("model").value;
-  if (!id) return;
-  if (id !== statsFor) { statsFor = id; statsLogsText = ""; statsLogsStick = true; }
-  statsBusy = true;
-  try {
-    const logsEl = $("statsLogs");
-    if (logsEl) statsLogsStick = logsEl.scrollTop + logsEl.clientHeight >= logsEl.scrollHeight - 20;
-    if (statsLogsOpen) await loadStatsLogs(id);
-    const r = await fetch(`/api/models/${encodeURIComponent(id)}/stats`);
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText);
-    if ($("model").value === id) renderStats(id, await r.json());
-  } catch (e) {
-    $("statsPane").innerHTML = `<h2>${esc(id)}</h2><div class="note">Stats unavailable: ${esc(e.message)}</div>`;
-  } finally { statsBusy = false; }
-}
-
-function renderStats(id, d) {
-  const st = d.status, c = d.config, b = d.backend || {}, q = d.requests || {}, mt = b.metrics || {};
-  const ready = st.state === "ready";
-  const now = Date.now();
-  let h = `<h2>${esc(id)}</h2><div class="sub"><span class="dot" style="background:${stateColor[st.state]}"></span>${esc(st.state)} · ${esc(st.engine)} on ${esc(d.node)}${st.resident ? " · resident" : ""}</div>`;
-  const act = actionFor(id, st.state);
-  h += `<div class="actions">
-    <button class="small${act.act === "load" ? " primary" : ""}" data-act="${act.act}" ${act.pending ? "disabled" : ""}>${act.label}</button>
-    <button class="small" data-act="logs">${statsLogsOpen ? "Hide logs" : "Logs"}</button></div>`;
-  if (st.error) h += `<div class="note" style="color:var(--bad)">${esc(st.error)}</div>`;
-
-  // Performance
-  const last = q.last;
-  h += `<h3>Performance</h3><div class="kpis">
-    <div class="kpi"><div class="label">Generation</div><div class="big">${fmtTPS(last?.gen_tps)} <small>tok/s</small></div></div>
-    <div class="kpi"><div class="label">Avg (last ${q.recent_gen_tps?.length || 0})</div><div class="big">${fmtTPS(q.avg_gen_tps)} <small>tok/s</small></div></div>
-  </div>${spark(q.recent_gen_tps)}<dl>
-    ${row("Prompt processing", q.avg_prompt_tps ? fmtTPS(q.avg_prompt_tps) + " tok/s" : null)}
-    ${row("Time to first token", q.avg_ttft_seconds ? fmtSecs(q.avg_ttft_seconds) + " avg" : null)}
-    ${row("Draft acceptance", q.draft_accept_rate ? (q.draft_accept_rate * 100).toFixed(0) + "%" : null, "Speculative decoding: share of drafted tokens the model accepted")}
-    ${row("Requests", q.requests ? `${q.requests}${q.errors ? ` (${q.errors} failed)` : ""}` : "none yet")}
-    ${row("Tokens in / out", q.requests ? `${fmtCount(q.prompt_tokens)} / ${fmtCount(q.completion_tokens)}` : null)}
-    ${last ? row("Last request", `${fmtCount(last.prompt_tokens || 0)} in${last.cached_tokens ? ` (${fmtCount(last.cached_tokens)} cached)` : ""} · ${fmtCount(last.completion_tokens || 0)} out`) : ""}
-  </dl>`;
-  if (last?.gen_tps_source === "measured") h += `<div class="note">Speed measured by ai-swap from the stream; this engine doesn't report its own timings.</div>`;
-
-  // Live backend state
-  if (ready && (b.slots || mt.kv_cache_usage_ratio !== undefined || mt.requests_processing !== undefined)) {
-    h += `<h3>Live</h3>`;
-    if (mt.kv_cache_usage_ratio !== undefined) h += meter("KV cache", mt.kv_cache_usage_ratio, 1, (mt.kv_cache_usage_ratio * 100).toFixed(1) + "%");
-    h += `<dl>
-      ${row("Slots busy", b.slots ? `${b.slots_busy ?? "?"} / ${b.slots}` : null, "Parallel request slots in the engine")}
-      ${row("Queued", mt.requests_deferred !== undefined ? String(mt.requests_deferred) : null)}
-      ${row("Tokens generated", mt.tokens_predicted_total !== undefined ? fmtCount(mt.tokens_predicted_total) : null, "Since this load, as counted by the engine")}
-      ${row("Prompt tokens", mt.prompt_tokens_total !== undefined ? fmtCount(mt.prompt_tokens_total) : null, "Since this load, as counted by the engine")}
-      ${row("Engine avg gen", mt.predicted_tokens_seconds ? fmtTPS(mt.predicted_tokens_seconds) + " tok/s" : null)}
-      ${row("Engine avg prompt", mt.prompt_tokens_seconds ? fmtTPS(mt.prompt_tokens_seconds) + " tok/s" : null)}
-    </dl>`;
-  }
-
-  // Memory
-  h += `<h3>Memory</h3>`;
-  if (d.rss_bytes) h += `<dl>${row("Process resident", fmtBytes(d.rss_bytes), "RSS of the engine process. On a discrete GPU, weights in VRAM are not included.")}</dl>`;
-  h += meter("Node reserved", c.node_used_gb * GB, (c.node_budget_gb || c.node_used_gb) * GB,
-    `${c.node_used_gb.toFixed(0)} / ${c.node_budget_gb ? c.node_budget_gb.toFixed(0) : "∞"} GB`);
-  h += `<dl>${row("This model reserves", c.memory_gb + " GB", "memory_gb from the config, used for swap planning")}</dl>`;
-  for (const g of d.gpus || []) {
-    h += meter(`${esc(g.name)} VRAM${g.busy_percent !== undefined ? ` · ${g.busy_percent}% busy` : ""}`, g.vram_used_bytes, g.vram_total_bytes);
-    if (g.gtt_used_bytes > 256 * 1024 ** 2) h += meter(`${esc(g.name)} GTT (system RAM)`, g.gtt_used_bytes, g.gtt_total_bytes);
-  }
-
-  // Model
-  const mods = (b.modalities || []).filter(Boolean);
-  h += `<h3>Model</h3><dl>
-    ${row("Parameters", b.params ? fmtCount(b.params) : null)}
-    ${row("Quantization", b.quant ? esc(b.quant) : null)}
-    ${row("Weights", b.size_bytes ? fmtBytes(b.size_bytes) : null)}
-    ${row("Context / request", b.ctx_per_slot ? fmtTok(b.ctx_per_slot) : (c.ctx ? fmtTok(c.ctx) : null))}
-    ${row("Context total", b.ctx && b.ctx !== b.ctx_per_slot ? fmtTok(b.ctx) : null)}
-    ${row("Trained context", b.ctx_train ? fmtTok(b.ctx_train) : null)}
-    ${row("Inputs", mods.length ? esc(mods.join(", ")) : null)}
-    ${row("Tool calling", b.tools === undefined ? null : b.tools ? "yes" : "no")}
-    ${row("Speculative decoding", b.speculative ? "on" : null)}
-    ${row("Vocabulary", b.vocab ? fmtCount(b.vocab) : null)}
-    ${row("Embedding dim", b.embed_dim ? String(b.embed_dim) : null)}
-  </dl>`;
-  if (!ready) h += `<div class="note">Load the model to see what the engine reports about it.</div>`;
-
-  // Backend
-  const up = st.loaded_at ? (now - Date.parse(st.loaded_at)) / 1000 : 0;
-  h += `<h3>Backend</h3><dl>
-    ${row("Engine", esc(st.engine) + (b.build ? ` <span style="color:var(--muted)">${esc(b.build)}</span>` : ""))}
-    ${row("Loaded for", up ? fmtSecs(up) : null)}
-    ${row("Load time", st.load_seconds ? fmtSecs(st.load_seconds) : null, "Process start until the health check passed")}
-    ${row("Idle unload", st.resident ? "never (resident)" : c.ttl_seconds ? "after " + fmtSecs(c.ttl_seconds) : "never")}
-    ${row("Port", st.port ? String(st.port) : null)}
-    ${row("PID", st.pid ? String(st.pid) : null)}
-    ${row("File", (b.model_path || c.model) ? `<span title="${esc(b.model_path || c.model)}">${esc((b.model_path || c.model).split("/").pop())}</span>` : null)}
-  </dl>`;
-  if (statsLogsOpen) h += `<pre id="statsLogs">${esc(statsLogsText || "(loading logs…)")}</pre>`;
-  const keepScroll = $("statsLogs")?.scrollTop;
-  $("statsPane").innerHTML = h;
-  const logs = $("statsLogs");
-  if (logs) logs.scrollTop = statsLogsStick || keepScroll === undefined ? logs.scrollHeight : keepScroll;
-}
-
-let statsLogsOpen = false, statsLogsText = "", statsLogsStick = true;
-async function loadStatsLogs(id) {
-  try { statsLogsText = await (await fetch(`/api/models/${encodeURIComponent(id)}/logs`)).text() || "(no output yet)"; }
-  catch (e) { statsLogsText = "Could not fetch logs: " + e.message; }
-}
-
-// ---- events ------------------------------------------------------------
+// ---- events ------------------------------------------------------------------------
 
 $("form").onsubmit = (e) => {
   e.preventDefault();
@@ -668,55 +1090,129 @@ $("form").onsubmit = (e) => {
   send(text);
 };
 $("input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("form").requestSubmit(); }
+  // On touch keyboards Enter is a new line; the Send button sends.
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !coarse) { e.preventDefault(); $("form").requestSubmit(); }
 });
 function autosize() { const t = $("input"); t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 240) + "px"; }
 $("input").addEventListener("input", autosize);
 $("newChat").onclick = newChat;
-$("modelList").onclick = (e) => {
-  const a = e.target.closest("button[data-act]");
-  if (a) { e.stopPropagation(); modelAction(a.dataset.ref, a.dataset.act); return; }
-  const b = e.target.closest("[data-model]");
-  if (b) selectModel(b.dataset.model);
-};
-$("modelList").onkeydown = (e) => {
-  if ((e.key === "Enter" || e.key === " ") && e.target.matches(".model-item")) { e.preventDefault(); selectModel(e.target.dataset.model); }
-};
-$("statsPane").onclick = (e) => {
-  const b = e.target.closest("button[data-act]");
-  if (!b) return;
-  const id = $("model").value;
-  if (b.dataset.act === "logs") { statsLogsOpen = !statsLogsOpen; statsLogsStick = true; refreshStats(); return; }
-  modelAction(id, b.dataset.act);
-};
-$("model").onchange = () => { const c = current(); if (c) { c.model = $("model").value; save(); } updateModelState(); refreshStats(); };
-if (store.get("aiswap.stats", true) === false) document.body.classList.add("no-stats");
-$("statsToggle").onclick = () => {
-  if (matchMedia("(max-width: 1100px)").matches) document.body.classList.toggle("show-stats");
-  else store.set("aiswap.stats", !document.body.classList.toggle("no-stats"));
-  refreshStats();
-};
-$("sideToggle").onclick = () => document.body.classList.toggle("show-side");
-$("tabChat").onclick = () => { $("view-chat").classList.remove("hidden"); $("view-models").classList.add("hidden"); };
-$("tabModels").onclick = () => { $("view-models").classList.remove("hidden"); $("view-chat").classList.add("hidden"); refresh(); };
-$("modelRows").onclick = async (e) => {
-  const b = e.target.closest("button[data-act]");
-  if (!b) return;
-  const ref = encodeURIComponent(b.dataset.ref);
-  if (b.dataset.act === "logs") {
-    const r = await fetch(`/api/models/${ref}/logs`);
-    $("logs").style.display = "block";
-    $("logs").textContent = (await r.text()) || "(no output yet)";
-    $("logs").scrollTop = $("logs").scrollHeight;
+$("filter").addEventListener("input", renderModelList);
+$("filter").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { const first = $("modelList").querySelector(".model-row"); if (first) selectModel(first.dataset.model); }
+  if (e.key === "ArrowDown") { e.preventDefault(); $("modelList").querySelector(".model-row")?.focus(); }
+  if (e.key === "Escape" && $("filter").value) { e.stopPropagation(); $("filter").value = ""; renderModelList(); }
+});
+$("modelList").addEventListener("click", (e) => {
+  const a = e.target.closest("[data-act]");
+  if (a) { modelAction(a.dataset.ref, a.dataset.act); return; }
+  const r = e.target.closest("[data-model]");
+  if (r) { selectModel(r.dataset.model); return; }
+  const n = e.target.closest("[data-node]");
+  if (n) {
+    const name = n.dataset.node;
+    collapsed.has(name) ? collapsed.delete(name) : collapsed.add(name);
+    store.set("aiswap.collapsed", [...collapsed]);
+    renderModelList();
+  }
+});
+$("modelList").addEventListener("keydown", (e) => {
+  if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+  const rows = [...$("modelList").querySelectorAll(".model-row")];
+  const i = rows.indexOf(document.activeElement);
+  if (i < 0) return;
+  e.preventDefault();
+  const next = rows[i + (e.key === "ArrowDown" ? 1 : -1)];
+  if (next) next.focus(); else if (e.key === "ArrowUp") $("filter").focus();
+});
+$("chatList").addEventListener("click", (e) => {
+  const d = e.target.closest("[data-del]");
+  if (d) { deleteChat(d.dataset.del); return; }
+  const o = e.target.closest("[data-chat]");
+  if (!o) return;
+  currentId = o.dataset.chat;
+  const c = current();
+  if (c?.model && fleet.some(m => m.id === c.model)) { selected = c.model; store.set("aiswap.model", selected); }
+  save(); render(); refreshStats(); closeDrawers();
+});
+$("messages").addEventListener("click", async (e) => {
+  const cb = e.target.closest("[data-code]");
+  if (cb) {
+    const block = cb.closest(".code");
+    if (cb.dataset.code === "wrap") { block.classList.toggle("wrap"); return; }
+    const ok = await copyText(block.querySelector("code").textContent);
+    cb.textContent = ok ? "Copied" : "Copy failed"; setTimeout(() => cb.textContent = "Copy", 1500);
     return;
   }
-  b.disabled = true; b.textContent = b.dataset.act === "load" ? "Loading…" : "Stopping…";
-  modelAction(b.dataset.ref, b.dataset.act);
+  const b = e.target.closest("[data-msg]");
+  if (!b) return;
+  const c = current(), i = +b.closest(".msg").dataset.i, m = c?.messages[i];
+  if (!m) return;
+  if (b.dataset.msg === "copy") { const ok = await copyText(m.content); b.textContent = ok ? "Copied" : "Copy failed"; setTimeout(() => b.textContent = "Copy", 1500); return; }
+  if (streaming) return;
+  if (b.dataset.msg === "retry") {
+    // Drop this reply and everything after it, then ask again from the turn before.
+    c.messages.splice(i);
+    if (!c.messages.length || c.messages[c.messages.length - 1].role !== "user") { save(); render(); return; }
+    send(null, { retry: true });
+  }
+  if (b.dataset.msg === "edit") {
+    $("input").value = m.content; autosize();
+    c.messages.splice(i); save(); render();
+    $("input").focus();
+    toast("Message moved back to the box; the turns after it were removed.");
+  }
+});
+$("stats").addEventListener("click", (e) => {
+  if (e.target.closest("[data-close]")) { closeDrawers(); return; }
+  const b = e.target.closest("[data-act]");
+  if (!b) return;
+  if (b.dataset.act === "logs") openLogs(selected); else modelAction(selected, b.dataset.act);
+});
+$("stats").addEventListener("toggle", (e) => { if (e.target.id === "statsMore") store.set("aiswap.statsMore", e.target.open); }, true);
+$("fleetRows").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-act]");
+  if (!b) return;
+  if (b.dataset.act === "logs") openLogs(b.dataset.ref); else modelAction(b.dataset.ref, b.dataset.act);
+});
+$("side").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeDrawers(); });
+$("chip").onclick = () => {
+  if (narrow()) document.body.classList.add("side-open");
+  $("filter").focus();
 };
+$("sideToggle").onclick = () => { document.body.classList.toggle("side-open"); if (document.body.classList.contains("side-open")) $("filter").focus(); };
+$("backdrop").onclick = closeDrawers;
+if (store.get("aiswap.stats", true) === false) document.body.classList.add("no-stats");
+$("statsToggle").onclick = () => {
+  if (statsOverlay()) { document.body.classList.remove("side-open"); document.body.classList.toggle("stats-open"); }
+  else store.set("aiswap.stats", !document.body.classList.toggle("no-stats"));
+  syncStatsToggle(); refreshStats();
+};
+$("tabChat").onclick = () => showView("chat");
+$("tabModels").onclick = () => showView("models");
+$("logClose").onclick = () => $("logs").close();
+$("logs").addEventListener("close", () => clearInterval(logTimer));
+matchMedia("(max-width: 1100px)").addEventListener("change", () => { closeDrawers(); refreshStats(); });
 
+document.addEventListener("keydown", (e) => {
+  const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
+  if (e.key === "/" && !typing && !e.metaKey && !e.ctrlKey) { e.preventDefault(); if (narrow()) document.body.classList.add("side-open"); $("filter").focus(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "o") { e.preventDefault(); newChat(); return; }
+  if (e.key === "Escape") {
+    if ($("logs").open) return; // the dialog closes itself
+    if (document.body.classList.contains("side-open") || document.body.classList.contains("stats-open")) { closeDrawers(); return; }
+    if (abort) { abort.abort(); return; }
+  }
+});
+
+// Poll every 3 s while the tab is visible; catch up as soon as it's shown again.
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+setInterval(() => { if (!document.hidden) refresh(); }, 3000);
+// Keep "loading 12s" counters moving between polls.
+setInterval(() => { if (!document.hidden && (startingSince.size || pending.size)) { renderModelList(); renderTop(); } }, 1000);
+
+syncStatsToggle();
 render();
 refresh();
-setInterval(refresh, 3000);
 </script>
 </body>
 </html>

@@ -270,18 +270,31 @@ loudly instead of being ignored.
 ### Chat UI
 
 Open `http://<machine>:8686/`.
-- **Chat** tab: conversations are kept in your browser's local storage.
-- **Models** tab: every model on every machine, with its state and memory,
-  plus Load, Unload and Logs buttons.
-- Left sidebar: every model, grouped by machine (click one to switch),
-  your chats, and memory use per machine.
-- Right pane (**Stats**): live numbers for the selected model. Generation
-  and prompt tok/s, time to first token, speculative-decoding acceptance and
-  token counts are measured by ai-swap on every request, so they work with
-  any engine; llama.cpp also reports its own timings, which are preferred.
-  When the model is loaded, the pane adds what the engine knows: parameters,
-  quantization, weights size, context, slots, KV cache, plus the engine
-  process's resident memory and, on Linux with AMD GPUs, VRAM/GTT use.
+
+- **Left sidebar:** a filter box (press `/`), every model grouped by machine
+  with that machine's memory bar in its header, and your chats. Loaded models
+  are listed first. Click a model to chat with it; hover a row for Load or
+  Unload. Machine groups collapse.
+- **Top bar:** the current model and its state, Chat / Models views, and the
+  Stats toggle. On a phone, ☰ opens the sidebar as a drawer.
+- **Chat:** streamed replies with Markdown (headings, lists, tables, code
+  with copy and wrap), a collapsible "Thought for N s" block for reasoning
+  models, and Copy / Retry / Edit on messages. If the selected model isn't
+  loaded, a note above the message box says what sending will load and what
+  it will unload. While a model loads, the reply shows "Loading… N s".
+  Conversations are kept in your browser's local storage.
+- **Stats** (right pane, or a drawer on narrow screens): generation and
+  prompt tok/s, time to first token, a speed sparkline, a one-line summary
+  of the model, GPU memory, and a collapsed Details section. Generation and
+  prompt tok/s, time to first token, token counts and draft acceptance are
+  measured by ai-swap on every request, so they work with any engine;
+  llama.cpp's own timings are preferred when present. Details adds what the
+  engine reports once loaded (parameters, quantization, context, slots,
+  counters), process memory, and on Linux with AMD GPUs, VRAM/GTT per card.
+- **Models view:** a table of every model on every machine with Load/Unload
+  and Logs. Logs open in a dialog that follows the output.
+- Keys: `/` filter models, `Esc` stop a reply or close a drawer,
+  `Ctrl/⌘+Shift+O` new chat. A banner appears if the server can't be reached.
 
 ### curl / OpenAI SDKs
 

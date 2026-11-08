@@ -13,8 +13,16 @@
   stats measured by the proxy (tok/s, TTFT, tokens, draft acceptance), live
   engine details (llama.cpp `/props`, `/slots`, `/metrics`, `/v1/models`),
   process RSS and AMD GPU memory. The llamacpp adapter now passes `--metrics`.
-- UI: clickable model list in the sidebar with hover load/unload buttons;
-  Load/Unload/Logs in the stats pane; 3-line message box.
+- UI rework after a usability review: phone and narrow-laptop layouts with
+  dismissable drawers; a top bar showing the current model and state (the
+  model dropdown and the desktop ☰ are gone); a filterable, per-machine model
+  list with memory bars in group headers; a note before a send that will swap
+  models, and "Loading… N s" while it does; Markdown tables, lists, headings,
+  links and code blocks with copy; streaming that no longer forces the scroll
+  position or reopens the thinking block; partial replies kept on errors and
+  reloads; Copy / Retry / Edit on messages; a compact stats pane with
+  collapsed details; logs in a dialog; an offline banner; keyboard focus kept
+  across refreshes; a favicon.
 - Fix: the chat UI failed over plain http from another machine
   (`crypto.randomUUID` is only available in secure contexts).
 
