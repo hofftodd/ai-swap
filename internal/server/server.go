@@ -148,6 +148,9 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 	}
 	defer release()
 
+	if strings.HasPrefix(r.URL.Path, "/v1/messages") {
+		body = foldSystemMessages(body)
+	}
 	m := s.cfg.Models[rt.local]
 	switch {
 	case m.UpstreamModel != "":

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Claude Code works with strict chat templates (e.g. Qwen 3.8): mid-conversation
+  `system` messages in `/v1/messages` requests are folded into the adjacent
+  user turn as `<system-reminder>` blocks before reaching a local engine.
+
 - `node.resident`: models a node keeps loaded by default. Loaded at
   startup, exempt from the idle TTL, evicted LRU-first under memory
   pressure, and reloaded automatically once they fit again.

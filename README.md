@@ -307,7 +307,11 @@ ANTHROPIC_BASE_URL=http://mac.local:8686 ANTHROPIC_MODEL=deepseek-v4-flash claud
 ```
 
 `/v1/messages` is routed the same way as OpenAI requests and passed straight
-to the engine. ai-swap does not translate between the two APIs, so the
+to the engine, with one fix-up: Claude Code puts `system`-role messages in
+the middle of the conversation, which most local chat templates reject
+(Qwen: "System message must be at the beginning"). ai-swap folds each one
+into the neighbouring user turn as a `<system-reminder>` block, leaving
+earlier messages untouched so the engine's prompt cache still applies. ai-swap does not translate between the two APIs, so the
 engine must support the Anthropic API itself. Sushi, ds4, Strata and recent
 llama.cpp all do.
 
