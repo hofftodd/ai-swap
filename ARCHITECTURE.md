@@ -233,8 +233,9 @@ shell commands.
 | Adapter | Binary | Model / ctx flags | Port | Health | OS | Source of truth |
 |---|---|---|---|---|---|---|
 | `llamacpp` | `llama-server` | `-m` / `-c` | `--port` (assigned), `--host` | `/health` | any | llama.cpp docs |
-| `sushi` | `sushi serve` | `--model` / `--ctx-size` | fixed 12345 | `/v1/models` | darwin | Sushi README + `docs/usage.md` |
-| `ds4` | `ds4-server` | `-m` / `--ctx` (+ `--chdir dir`) | fixed 8000 | `/v1/models` | darwin, linux | ds4 `docs/SERVER.md` |
+| `sushi` | `sushi --serve` | `--model` / `--ctx-size` | `--port` (assigned), `--host` | `/v1/models` | darwin | `sushi --help` (1.4.1) |
+| `ds4` | `ds4-server` | `-m` / `--ctx` | `--port` (assigned), `--host` | `/v1/models` | darwin, linux | `ds4-server --help` |
+| `omlx` | `omlx serve` | `--model-dir` = parent of `model` | `--port` (assigned), `--host` | `/v1/models`, then POST `/v1/models/{id}/load` | darwin | `omlx serve --help` (0.7.3) |
 | `strata` | (needs `cmd`) | – | fixed 8080 or `${PORT}` | `/v1/models` | any | Strata README |
 | `generic` | (needs `cmd`) | – | `${PORT}` or `port` | `/v1/models` | any | – |
 
@@ -252,6 +253,11 @@ express (for example, finding models on disk), implement `Engine` directly.
 - **Stopping:** SIGTERM, wait up to 15 s, then SIGKILL.
 - **Health check:** GET `http://127.0.0.1:<port><health_path>` every 500 ms
   until a 200. Fails early if the process exits first.
+- **Warm-up:** if the adapter sets a warm-up path (oMLX), it is POSTed once
+  the health check passes, and the model is `ready` only when that answers
+  2xx. oMLX answers health checks before loading any weights, so without
+  this "ready" would mean "listening" and the first request would pay for
+  the load.
 - **Logs:** stdout and stderr go to a 256 KB ring buffer per model, prefixed
   with ai-swap's own `exec` and `exited` lines. They are shown at
   `/api/models/{name}/logs` and in the UI.
@@ -268,6 +274,13 @@ express (for example, finding models on disk), implement `Engine` directly.
   load/unload request, the machine re-polls that peer straight away
   (`cluster.Refresh`), so a model the peer just loaded shows as `ready`
   without waiting up to 10 s.
+- **Failing fast:** peer connections time out after 3 s. A forward that
+  can't connect marks the peer offline immediately, and a request for a
+  model that only an offline peer has gets `503` + `Retry-After`, naming the
+  node, rather than `404`. (Offline peers keep their last model list for
+  this.) The 3 s limit matters with mDNS names: if a hostname also resolves
+  to an IPv6 address that a firewall silently drops, every new connection
+  would otherwise wait 20-75 s.
 - **Choosing a peer** (`cluster.Find`): online peers that have the name (or
   alias) and can run it, preferring one where it is already `ready`.
   `model@node` matches either the peer's configured name or the name it
@@ -365,10 +378,8 @@ go test -race ./...
 
 Roughly in priority order:
 
-1. **Confirm engine flags on real hardware.** Get `sushi serve --help`,
-   `ds4-server --help` and Strata's non-interactive server command. Then
-   set the port and host flags in the adapters, so engines get assigned
-   ports and stop conflicting on fixed ones.
+1. **Strata's non-interactive server command.** (Sushi's and ds4's flags
+   were confirmed on an M5 Ultra; both now get assigned ports.)
 2. **Authentication.** A shared `node.api_key`, checked on inbound requests
    (Bearer or `x-api-key`) and sent to peers.
 3. **Fair swapping.** Add the "draining" flag described under

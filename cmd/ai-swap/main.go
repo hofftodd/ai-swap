@@ -17,6 +17,7 @@ import (
 
 	"github.com/hofftodd/ai-swap/internal/cluster"
 	"github.com/hofftodd/ai-swap/internal/config"
+	"github.com/hofftodd/ai-swap/internal/engine"
 	"github.com/hofftodd/ai-swap/internal/scheduler"
 	"github.com/hofftodd/ai-swap/internal/server"
 	"github.com/hofftodd/ai-swap/internal/version"
@@ -49,6 +50,7 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 	if listen != "" {
 		cfg.Node.Listen = listen
 	}
+	engine.ApplyDefaults(cfg)
 	mgr, err := scheduler.New(cfg, log)
 	if err != nil {
 		return err

@@ -21,9 +21,10 @@ defaults:
 engines:
   sushi:
     bin: /opt/homebrew/bin/sushi
-    # Sushi's docs only show its fixed address (127.0.0.1:12345). If it has a
-    # port flag, set it here and ai-swap will assign ports itself:
-    # port_flag: --port
+  omlx:
+    bin: /opt/homebrew/bin/omlx
+    # oMLX sizes its SSD prompt cache to half the free disk by default, per model.
+    args: [--paged-ssd-cache-max-size, 50GB]
   ds4:
     bin: ~/src/ds4/ds4-server
     dir: ~/src/ds4
@@ -45,6 +46,12 @@ models:
     ctx: 65536
     memory_gb: 100
     aliases: [deepseek]
+
+  # oMLX: model is the model's own folder (config.json + *.safetensors).
+  flint:
+    engine: omlx
+    model: ~/models/omlx/flint-oq4e
+    memory_gb: 36
 
   # Anything else that speaks the OpenAI API, e.g. a small MLX model for
   # quick tasks. ${PORT} is assigned by ai-swap.

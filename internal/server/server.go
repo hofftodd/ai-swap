@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -51,9 +52,7 @@ type Server struct {
 
 // New builds the server. ui may be nil.
 func New(cfg *config.Config, mgr *scheduler.Manager, cl *cluster.Cluster, ui fs.FS, log *slog.Logger) *Server {
-	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.ResponseHeaderTimeout = 0 // prefill on huge prompts can take minutes
-	return &Server{cfg: cfg, mgr: mgr, cluster: cl, log: log, transport: t, ui: ui, stats: stats.NewRecorder()}
+	return &Server{cfg: cfg, mgr: mgr, cluster: cl, log: log, transport: cluster.NewTransport(), ui: ui, stats: stats.NewRecorder()}
 }
 
 // Handler returns the root HTTP handler.
@@ -123,7 +122,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 
 	rt, ok := s.resolve(head.Model, r.Header.Get(cluster.HopHeader) == "")
 	if !ok {
-		s.apiError(w, r, http.StatusNotFound, "not_found_error", fmt.Sprintf("model %q is not available on any node", head.Model))
+		s.notFound(w, r, head.Model)
 		return
 	}
 
@@ -167,6 +166,23 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// notFound answers a request for a model no online node serves: 503 with
+// Retry-After if an offline peer has it (agents should retry), else 404.
+func (s *Server) notFound(w http.ResponseWriter, r *http.Request, model string) {
+	if r.Header.Get(cluster.HopHeader) == "" {
+		if peer, seen, ok := s.cluster.FindOffline(model); ok {
+			msg := fmt.Sprintf("model %q is on node %s, which is offline", model, peer)
+			if !seen.IsZero() {
+				msg += fmt.Sprintf(" (last seen %s ago)", time.Since(seen).Round(time.Second))
+			}
+			w.Header().Set("Retry-After", "10")
+			s.apiError(w, r, http.StatusServiceUnavailable, "api_error", msg)
+			return
+		}
+	}
+	s.apiError(w, r, http.StatusNotFound, "not_found_error", fmt.Sprintf("model %q is not available on any node", model))
+}
+
 func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte, target *url.URL, hop bool) {
 	rp := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
@@ -182,6 +198,15 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte, targ
 		Transport:     s.transport,
 		FlushInterval: -1, // stream SSE tokens as they arrive
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			if hop {
+				var op *net.OpError
+				if errors.As(err, &op) && op.Op == "dial" {
+					s.cluster.MarkDown(target, err)
+				}
+				w.Header().Set("Retry-After", "10")
+				s.apiError(w, r, http.StatusBadGateway, "api_error", "peer "+target.Host+" unreachable: "+err.Error())
+				return
+			}
 			s.apiError(w, r, http.StatusBadGateway, "api_error", "upstream: "+err.Error())
 		},
 	}
@@ -212,6 +237,8 @@ type modelEntry struct {
 	Local  bool            `json:"local"`
 	Status scheduler.State `json:"status"`
 	Engine string          `json:"engine"`
+	// ContextLength is the configured context, when set (vLLM/OpenRouter-style field).
+	ContextLength int `json:"context_length,omitempty"`
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
@@ -229,6 +256,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 		data = append(data, modelEntry{
 			ID: id, Object: "model", OwnedBy: node,
 			Node: node, Local: local, Status: st.State, Engine: st.Engine,
+			ContextLength: st.Ctx,
 		})
 	}
 	for _, st := range s.mgr.Snapshot() {

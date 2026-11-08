@@ -5,6 +5,9 @@ package engine
 
 import (
 	"fmt"
+	"net/url"
+	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -26,6 +29,10 @@ type Launch struct {
 	Env        []string
 	Port       int
 	HealthPath string
+	// WarmupPath, if set, is POSTed once the health check passes; the model
+	// counts as ready only when it answers 2xx. Engines that start serving
+	// before their weights are loaded (oMLX) use it so "ready" means ready.
+	WarmupPath string
 }
 
 // Engine is an inference-engine adapter.
@@ -54,6 +61,10 @@ type builtin struct {
 	fixedPort  int
 	healthPath string
 	extra      func(m *config.Model, ec config.EngineConfig) []string
+	// Optional hooks for engines that address models differently.
+	modelValue func(model string) string    // value passed to modelFlag
+	warmup     func(m *config.Model) string // Launch.WarmupPath
+	upstream   func(m *config.Model) string // default upstream_model
 }
 
 func (b *builtin) Name() string { return b.name }
@@ -70,6 +81,9 @@ func (b *builtin) Build(m *config.Model, ec config.EngineConfig, allocPort func(
 		Dir:        ec.Dir,
 		HealthPath: firstNonEmpty(m.HealthPath, b.healthPath, "/v1/models"),
 		Env:        envList(ec.Env, m.Env),
+	}
+	if b.warmup != nil {
+		l.WarmupPath = b.warmup(m)
 	}
 
 	switch {
@@ -103,7 +117,11 @@ func (b *builtin) Build(m *config.Model, ec config.EngineConfig, allocPort func(
 	argv := []string{firstNonEmpty(ec.Bin, b.bin)}
 	argv = append(argv, b.subcmd...)
 	if m.Model != "" && b.modelFlag != "" {
-		argv = append(argv, b.modelFlag, m.Model)
+		v := m.Model
+		if b.modelValue != nil {
+			v = b.modelValue(v)
+		}
+		argv = append(argv, b.modelFlag, v)
 	}
 	if m.Ctx > 0 && b.ctxFlag != "" {
 		argv = append(argv, b.ctxFlag, strconv.Itoa(m.Ctx))
@@ -159,32 +177,54 @@ func init() {
 		},
 	})
 
-	// Sushi: Apple Silicon only. Its docs show `sushi serve --model DIR
-	// --ctx-size N` and a default listen address of 127.0.0.1:12345; no port
-	// flag is documented, so it runs on its fixed port unless
-	// engines.sushi.port_flag is set.
+	// Sushi: Apple Silicon only. `sushi --serve --model DIR --ctx-size N
+	// --host H --port P` (checked against sushi 1.4.1 on an M5 Ultra).
 	register(&builtin{
-		name: "sushi", bin: "sushi", subcmd: []string{"serve"},
+		name: "sushi", bin: "sushi", subcmd: []string{"--serve"},
 		goos:      []string{"darwin"},
 		caps:      Caps{OpenAI: true, Anthropic: true},
-		modelFlag: "--model", ctxFlag: "--ctx-size",
-		fixedPort: 12345,
+		modelFlag: "--model", ctxFlag: "--ctx-size", portFlag: "--port", hostFlag: "--host",
 	})
 
-	// ds4 (DwarfStar4): DeepSeek V4 Flash. `ds4-server -m FILE --ctx N`,
-	// default 127.0.0.1:8000, serves /v1/chat/completions and /v1/messages.
-	// Builds exist for Metal, CUDA (DGX Spark) and ROCm (Strix Halo).
+	// ds4 (DwarfStar4): DeepSeek V4 Flash. `ds4-server -m FILE --ctx N
+	// --host H --port P`, serves /v1/chat/completions and /v1/messages.
+	// Builds exist for Metal, CUDA (DGX Spark) and ROCm (Strix Halo). It has
+	// no working-directory flag; engines.ds4.dir sets the process's cwd.
 	register(&builtin{
 		name: "ds4", bin: "ds4-server",
 		goos:      []string{"darwin", "linux"},
 		caps:      Caps{OpenAI: true, Anthropic: true},
-		modelFlag: "-m", ctxFlag: "--ctx",
-		fixedPort: 8000,
-		extra: func(m *config.Model, ec config.EngineConfig) []string {
-			if ec.Dir != "" {
-				return []string{"--chdir", ec.Dir}
+		modelFlag: "-m", ctxFlag: "--ctx", portFlag: "--port", hostFlag: "--host",
+	})
+
+	// oMLX: MLX models with continuous batching (Apple Silicon). It serves
+	// every model directory under --model-dir and loads one on first use, so
+	// `model:` is the model's own directory: the adapter passes its parent as
+	// --model-dir, sends requests under the directory's name, and loads the
+	// weights before reporting ready. Each model gets its own SSD prompt cache.
+	register(&builtin{
+		name: "omlx", bin: "omlx", subcmd: []string{"serve"},
+		goos:      []string{"darwin"},
+		caps:      Caps{OpenAI: true, Anthropic: true},
+		modelFlag: "--model-dir", portFlag: "--port", hostFlag: "--host",
+		modelValue: filepath.Dir,
+		upstream:   func(m *config.Model) string { return filepath.Base(m.Model) },
+		warmup: func(m *config.Model) string {
+			if m.Model == "" {
+				return ""
 			}
-			return nil
+			return "/v1/models/" + url.PathEscape(upstreamOf(m)) + "/load"
+		},
+		extra: func(m *config.Model, ec config.EngineConfig) []string {
+			out := []string{"--headless"}
+			if m.Model != "" && !slices.Contains(m.Args, "--paged-ssd-cache-dir") &&
+				!slices.Contains(ec.Args, "--paged-ssd-cache-dir") {
+				if home, err := os.UserHomeDir(); err == nil {
+					out = append(out, "--paged-ssd-cache-dir",
+						filepath.Join(home, ".omlx", "cache", "ai-swap", filepath.Base(m.Model)))
+				}
+			}
+			return out
 		},
 	})
 
@@ -202,6 +242,27 @@ func init() {
 		name: "generic",
 		caps: Caps{OpenAI: true},
 	})
+}
+
+// upstreamOf is the model name an oMLX-style engine expects.
+func upstreamOf(m *config.Model) string {
+	if m.UpstreamModel != "" {
+		return m.UpstreamModel
+	}
+	return filepath.Base(m.Model)
+}
+
+// ApplyDefaults fills in engine-specific defaults that live on the model
+// config (currently upstream_model for engines that address models by
+// directory name). Call it once after loading the config.
+func ApplyDefaults(cfg *config.Config) {
+	for _, m := range cfg.Models {
+		b, ok := registry[m.Engine].(*builtin)
+		if !ok || b.upstream == nil || m.UpstreamModel != "" || m.Model == "" {
+			continue
+		}
+		m.UpstreamModel = b.upstream(m)
+	}
 }
 
 func substitute(s string, m *config.Model, port int) string {

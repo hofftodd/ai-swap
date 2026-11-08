@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- Engine flags confirmed on an M5 Ultra (roadmap item 1): `sushi --serve` (not
+  `sushi serve`) and `ds4-server` both take `--host`/`--port`, so they now get
+  ports from `port_range` and two models on either engine can run side by side.
+  The ds4 adapter no longer passes `--chdir`, which ds4-server doesn't have;
+  `engines.ds4.dir` sets the working directory.
+- New `omlx` engine ([oMLX](https://github.com/jundot/omlx), MLX with continuous
+  batching). `model:` is the model's directory; the adapter serves its parent,
+  sends requests under the directory name, gives each model its own SSD prompt
+  cache, and loads the weights before reporting ready.
+- Engines can declare a warm-up request (`Launch.WarmupPath`), POSTed after the
+  health check; the model is `ready` only once it answers 2xx.
+- Peers: connections time out after 3 s (a hostname that also resolves to an
+  unreachable IPv6 address used to hang each new connection for 20-75 s); a
+  failed forward marks the peer offline at once; a model on an offline peer
+  gets `503` with `Retry-After: 10` naming the node instead of `404`.
+- `/v1/models` entries carry `context_length` when the model sets `ctx`.
+
 - Claude Code works with strict chat templates (e.g. Qwen 3.8): mid-conversation
   `system` messages in `/v1/messages` requests are folded into the adjacent
   user turn as `<system-reminder>` blocks before reaching a local engine.

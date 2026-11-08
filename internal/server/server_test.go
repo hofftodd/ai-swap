@@ -67,8 +67,9 @@ func startBackend(l *engine.Launch, _ *process.RingBuffer) (scheduler.Handle, er
 }
 
 type node struct {
-	url string
-	mgr *scheduler.Manager
+	url   string
+	mgr   *scheduler.Manager
+	close func() // stops the node's HTTP server, as if the machine went away
 }
 
 func newNode(t *testing.T, yaml string, peers ...string) *node {
@@ -93,7 +94,9 @@ func newNode(t *testing.T, yaml string, peers ...string) *node {
 	ctx, cancel := context.WithCancel(context.Background())
 	go cl.Run(ctx, time.Hour)
 	ts := httptest.NewServer(New(cfg, mgr, cl, nil, log).Handler())
-	t.Cleanup(func() { cancel(); ts.Close(); mgr.StopAll() })
+	var once sync.Once
+	closeTS := func() { once.Do(ts.Close) }
+	t.Cleanup(func() { cancel(); closeTS(); mgr.StopAll() })
 	if len(peers) > 0 {
 		deadline := time.Now().Add(2 * time.Second)
 		for !allOnline(cl) {
@@ -103,7 +106,7 @@ func newNode(t *testing.T, yaml string, peers ...string) *node {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	return &node{url: ts.URL, mgr: mgr}
+	return &node{url: ts.URL, mgr: mgr, close: closeTS}
 }
 
 func allOnline(cl *cluster.Cluster) bool {
@@ -218,6 +221,44 @@ func peerModelReady(t *testing.T, base, id string) bool {
 		}
 	}
 	return false
+}
+
+// A peer that goes away: the first forward fails fast with 502 and marks the
+// peer offline; later requests get 503 + Retry-After naming the node, not 404.
+func TestOfflinePeer(t *testing.T) {
+	linux := newNode(t, linuxCfg)
+	mac := newNode(t, macCfg, linux.url)
+	linux.close()
+
+	start := time.Now()
+	resp, err := http.Post(mac.url+"/v1/chat/completions", "application/json", strings.NewReader(`{"model":"coder","messages":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway || resp.Header.Get("Retry-After") == "" {
+		t.Fatalf("first request: %d, Retry-After %q", resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+	if d := time.Since(start); d > 4*time.Second {
+		t.Fatalf("first request took %s", d)
+	}
+
+	for _, path := range []string{"/v1/chat/completions", "/v1/messages"} {
+		resp, err := http.Post(mac.url+path, "application/json", strings.NewReader(`{"model":"c@peer0","max_tokens":5,"messages":[]}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") != "10" ||
+			!strings.Contains(string(b), "peer0, which is offline") {
+			t.Fatalf("%s: %d %s", path, resp.StatusCode, b)
+		}
+	}
+	// A model nobody has is still a plain 404.
+	if code, _ := post(t, mac.url+"/v1/chat/completions", `{"model":"nope","messages":[]}`); code != http.StatusNotFound {
+		t.Fatalf("unknown model: %d", code)
+	}
 }
 
 func TestUnknownModelErrorShapes(t *testing.T) {

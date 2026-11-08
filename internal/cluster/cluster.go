@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -55,7 +56,7 @@ type Cluster struct {
 
 // New creates a cluster view from the configured peers.
 func New(peers []config.Peer, log *slog.Logger) (*Cluster, error) {
-	c := &Cluster{log: log, client: &http.Client{Timeout: 5 * time.Second}}
+	c := &Cluster{log: log, client: &http.Client{Timeout: 5 * time.Second, Transport: NewTransport()}}
 	for _, p := range peers {
 		u, err := url.Parse(strings.TrimRight(p.URL, "/"))
 		if err != nil {
@@ -142,6 +143,56 @@ func (c *Cluster) Refresh(base *url.URL) {
 			return
 		}
 	}
+}
+
+// NewTransport returns the HTTP transport used for peers and engines. It
+// bounds the time to connect: a peer whose hostname also resolves to an
+// address that silently drops packets (an IPv6 address behind a firewall, a
+// stale mDNS entry) would otherwise hang each new connection until the OS
+// gives up, about 20-75 s, instead of failing over or failing fast. It sets
+// no response-header timeout: prefill on a huge prompt can take minutes.
+func NewTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.DialContext = (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	t.ResponseHeaderTimeout = 0
+	t.MaxIdleConnsPerHost = 32 // several agents streaming through one peer
+	return t
+}
+
+// MarkDown records that forwarding to the peer at base failed to connect, so
+// later requests fail fast instead of each waiting for a timeout. The next
+// successful poll brings the peer back.
+func (c *Cluster) MarkDown(base *url.URL, err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, p := range c.peers {
+		if p.parsed.String() == base.String() && p.Online {
+			c.log.Warn("peer offline", "peer", p.Name, "err", err)
+			p.Online, p.Error = false, err.Error()
+		}
+	}
+}
+
+// FindOffline reports which offline peer last listed the model, so a client
+// can be told the model is temporarily unreachable rather than unknown.
+func (c *Cluster) FindOffline(name string) (peer string, lastSeen time.Time, ok bool) {
+	want, node, pinned := strings.Cut(name, "@")
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, p := range c.peers {
+		if p.Online || p.Node == nil {
+			continue
+		}
+		if pinned && p.Name != node && p.Node.Name != node {
+			continue
+		}
+		for _, m := range p.Node.Models {
+			if m.Name == want || contains(m.Aliases, want) {
+				return p.Name, p.LastSeen, true
+			}
+		}
+	}
+	return "", time.Time{}, false
 }
 
 // Peers returns a copy of every peer's state.

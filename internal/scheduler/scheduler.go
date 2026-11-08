@@ -75,6 +75,7 @@ type Status struct {
 	State    State       `json:"state"`
 	Port     int         `json:"port,omitempty"`
 	MemoryGB float64     `json:"memory_gb"`
+	Ctx      int         `json:"ctx,omitempty"` // configured context length; 0 = engine default
 	Inflight int         `json:"inflight"`
 	LastUsed *time.Time  `json:"last_used,omitempty"`
 	Error    string      `json:"error,omitempty"`
@@ -330,7 +331,7 @@ func (m *Manager) Snapshot() []Status {
 		inst := m.instances[name]
 		s := Status{
 			Name: name, Engine: inst.Engine.Name(), State: inst.state,
-			MemoryGB: inst.Model.MemoryGB, Inflight: inst.inflight,
+			MemoryGB: inst.Model.MemoryGB, Ctx: inst.Model.Ctx, Inflight: inst.inflight,
 			Error: inst.lastErr, Aliases: inst.Model.Aliases,
 			Caps: inst.Engine.Caps(), Runnable: inst.Engine.Supported(),
 			Resident: m.cfg.IsResident(name),

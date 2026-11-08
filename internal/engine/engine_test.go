@@ -26,23 +26,23 @@ func TestBuildCommands(t *testing.T) {
 		},
 		{
 			engine:   "sushi",
-			model:    config.Model{Name: "s", Model: "/m/sushi", Ctx: 131072},
-			wantArgv: []string{"sushi", "serve", "--model", "/m/sushi", "--ctx-size", "131072"},
-			wantPort: 12345,
-		},
-		{
-			engine:   "sushi",
-			model:    config.Model{Name: "s", Model: "/m/sushi"},
-			ec:       config.EngineConfig{Bin: "/opt/homebrew/bin/sushi", PortFlag: "--port"},
-			wantArgv: []string{"/opt/homebrew/bin/sushi", "serve", "--model", "/m/sushi", "--port", "9100"},
+			model:    config.Model{Name: "s", Model: "/m/sushi", Ctx: 131072, Args: []string{"--no-vision"}},
+			ec:       config.EngineConfig{Bin: "/opt/homebrew/bin/sushi"},
+			wantArgv: []string{"/opt/homebrew/bin/sushi", "--serve", "--model", "/m/sushi", "--ctx-size", "131072", "--host", "127.0.0.1", "--port", "9100", "--no-vision"},
 			wantPort: 9100,
 		},
 		{
 			engine:   "ds4",
 			model:    config.Model{Name: "d", Model: "ds4flash.gguf", Ctx: 32768},
 			ec:       config.EngineConfig{Bin: "/src/ds4/ds4-server", Dir: "/src/ds4", Args: []string{"--kv-disk-dir", "/tmp/kv"}},
-			wantArgv: []string{"/src/ds4/ds4-server", "-m", "ds4flash.gguf", "--ctx", "32768", "--chdir", "/src/ds4", "--kv-disk-dir", "/tmp/kv"},
-			wantPort: 8000,
+			wantArgv: []string{"/src/ds4/ds4-server", "-m", "ds4flash.gguf", "--ctx", "32768", "--host", "127.0.0.1", "--port", "9100", "--kv-disk-dir", "/tmp/kv"},
+			wantPort: 9100,
+		},
+		{
+			engine:   "omlx",
+			model:    config.Model{Name: "f", Model: "/m/omlx/flint-oq4e", Args: []string{"--paged-ssd-cache-dir", "/c"}},
+			wantArgv: []string{"omlx", "serve", "--model-dir", "/m/omlx", "--host", "127.0.0.1", "--port", "9100", "--headless", "--paged-ssd-cache-dir", "/c"},
+			wantPort: 9100,
 		},
 		{
 			engine:   "strata",
@@ -74,6 +74,40 @@ func TestBuildCommands(t *testing.T) {
 				t.Errorf("port = %d, want %d", l.Port, tt.wantPort)
 			}
 		})
+	}
+}
+
+func TestOMLXWarmupAndUpstream(t *testing.T) {
+	cfg := &config.Config{Models: map[string]*config.Model{
+		"flint":  {Name: "flint", Engine: "omlx", Model: "/m/omlx/flint-oq4e"},
+		"pinned": {Name: "pinned", Engine: "omlx", Model: "/m/omlx/x", UpstreamModel: "custom id"},
+		"llama":  {Name: "llama", Engine: "llamacpp", Model: "/m/q.gguf"},
+	}}
+	ApplyDefaults(cfg)
+	if got := cfg.Models["flint"].UpstreamModel; got != "flint-oq4e" {
+		t.Errorf("flint upstream = %q", got)
+	}
+	if got := cfg.Models["pinned"].UpstreamModel; got != "custom id" {
+		t.Errorf("pinned upstream overwritten: %q", got)
+	}
+	if got := cfg.Models["llama"].UpstreamModel; got != "" {
+		t.Errorf("llamacpp got an upstream: %q", got)
+	}
+	e, _ := Get("omlx")
+	for name, want := range map[string]string{"flint": "/v1/models/flint-oq4e/load", "pinned": "/v1/models/custom%20id/load"} {
+		l, err := e.Build(cfg.Models[name], config.EngineConfig{}, alloc(9100))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if l.WarmupPath != want {
+			t.Errorf("%s warmup = %q, want %q", name, l.WarmupPath, want)
+		}
+	}
+	if l, _ := Get("llamacpp"); l != nil {
+		ll, _ := l.Build(cfg.Models["llama"], config.EngineConfig{}, alloc(9100))
+		if ll.WarmupPath != "" {
+			t.Errorf("llamacpp warmup = %q", ll.WarmupPath)
+		}
 	}
 }
 

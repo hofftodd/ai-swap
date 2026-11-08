@@ -3,9 +3,11 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -75,7 +77,7 @@ func (p *Process) WaitHealthy(ctx context.Context, timeout time.Duration) error 
 		if resp, err := client.Do(req); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				return nil
+				return p.warmup(ctx)
 			}
 		}
 		select {
@@ -86,6 +88,27 @@ func (p *Process) WaitHealthy(ctx context.Context, timeout time.Duration) error 
 		case <-tick.C:
 		}
 	}
+}
+
+// warmup POSTs the launch's WarmupPath, if any, and waits for a 2xx. Loading
+// weights can take minutes, so it uses the remaining health timeout.
+func (p *Process) warmup(ctx context.Context) error {
+	if p.launch.WarmupPath == "" {
+		return nil
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", p.launch.Port, p.launch.WarmupPath)
+	fmt.Fprintf(p.logs, "[ai-swap] warm-up POST %s\n", p.launch.WarmupPath)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("warm-up %s: %w", p.launch.WarmupPath, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("warm-up %s: %s: %s", p.launch.WarmupPath, resp.Status, bytes.TrimSpace(msg))
+	}
+	return nil
 }
 
 // Stop sends SIGTERM to the process group, then SIGKILL after grace.

@@ -82,8 +82,9 @@ the problem:
 | Engine | `engine:` | Runs on | API | Adapter status |
 |---|---|---|---|---|
 | [llama.cpp](https://github.com/ggml-org/llama.cpp) `llama-server` | `llamacpp` | macOS, Linux (CUDA, ROCm, Vulkan, Metal) | OpenAI + Anthropic | Flags well known; ports assigned by ai-swap |
-| [Sushi](https://github.com/joshuaswarren/sushi) | `sushi` | macOS, Apple Silicon | OpenAI + Anthropic | Built from the README. Port flag unknown, so it uses fixed port 12345 |
-| [ds4 / DwarfStar4](https://github.com/antirez/ds4) | `ds4` | macOS (Metal), Linux (DGX Spark CUDA, Strix Halo ROCm) | OpenAI + Anthropic | Built from `docs/SERVER.md`. Port flag unknown, so it uses fixed port 8000 |
+| [Sushi](https://github.com/joshuaswarren/sushi) | `sushi` | macOS, Apple Silicon | OpenAI + Anthropic | Checked on an M5 Ultra (sushi 1.4.1): `sushi --serve`, ports assigned by ai-swap |
+| [ds4 / DwarfStar4](https://github.com/antirez/ds4) | `ds4` | macOS (Metal), Linux (DGX Spark CUDA, Strix Halo ROCm) | OpenAI + Anthropic | Checked on an M5 Ultra: ports assigned by ai-swap |
+| [oMLX](https://github.com/jundot/omlx) | `omlx` | macOS, Apple Silicon | OpenAI + Anthropic | Checked on an M5 Ultra (oMLX 0.7.3). `model:` is the model's folder; weights load before `ready` |
 | [Strata](https://github.com/Niko1221/Strata) | `strata` | NVIDIA, AMD (incl. Radeon AI PRO R9700), Apple Silicon | OpenAI + Anthropic | Needs `cmd:`, because `strata launch` is interactive. Fixed port 8080 unless your `cmd:` uses `${PORT}` |
 | Anything OpenAI-compatible | `generic` | anywhere | OpenAI | You supply `cmd:` |
 
@@ -334,7 +335,7 @@ llama.cpp all do.
 |---|---|
 | `POST /v1/chat/completions`, `/v1/completions`, `/v1/responses`, `/v1/embeddings` | OpenAI-compatible; routed by the body's `model` |
 | `POST /v1/messages`, `/v1/messages/count_tokens` | Anthropic-compatible; routed by `model` |
-| `GET /v1/models` | Every runnable model on this machine and online peers. Each entry has extra `node`, `status` and `engine` fields |
+| `GET /v1/models` | Every runnable model on this machine and online peers. Each entry has extra `node`, `local`, `status` and `engine` fields, and `context_length` when the model sets `ctx` |
 | `GET /api/status` | This machine (version, OS, memory, model states) plus every peer's last known state |
 | `GET /api/node` | This machine only; peers poll this |
 | `POST /api/models/{name}/load` | Load a model now. `{name}` may be `model@node` |
@@ -379,6 +380,8 @@ On SIGTERM, ai-swap stops every engine it started before exiting.
 | Request hangs for a long time | A swap may be waiting for a busy model to finish. A first load of a 100 GB model is also slow; raise `health_timeout` if it times out |
 | Mac becomes unresponsive or panics | `memory_budget_gb` is too high. Sushi's docs warn that over-committing wired memory can kernel-panic macOS; leave about 15% headroom |
 | Peer shows offline | Check `curl http://peer:8686/api/node` from this machine, and that the peer listens on `0.0.0.0` |
+| Requests to a peer are slow to start, or slow to fail when it's down | Its hostname may also resolve to an IPv6 address the peer's firewall drops (`curl -6 http://peer:8686/health` hangs). Allow the port over IPv6 on the peer, or put its IPv4 address in `peers` |
+| `503` "model … is on node X, which is offline" | The model's machine stopped answering. Clients should retry after `Retry-After`; the peer is polled every 10 s |
 | Streaming arrives in one chunk behind nginx | Set `proxy_buffering off;` for `/v1/` |
 
 ## Security
@@ -390,9 +393,8 @@ is the first item on the roadmap.
 
 ## Known gaps
 
-- Port and host flags for Sushi and ds4, and a non-interactive server
-  command for Strata, are not confirmed yet. Until then, two models on the
-  same one of these engines are swapped rather than run side by side.
+- A non-interactive server command for Strata is not confirmed yet, so two
+  Strata models are swapped rather than run side by side.
 - `memory_gb` is what you configure, not measured usage.
 - If a model is defined on two machines, the local one is preferred, rather
   than whichever has free memory.
