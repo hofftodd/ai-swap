@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- llama-swap compatibility: `GET /running`, `GET|POST /unload` (also
+  `POST /api/unload`) and `GET /upstream/{model}/{path...}` for this
+  machine's models, so tools written for llama-swap (benchmark harnesses,
+  scripts that free the GPU first) work unchanged. `/api/node` and
+  `/api/status` now report each running model's command line (`cmd`).
+
 - Engine flags confirmed on an M5 Ultra (roadmap item 1): `sushi --serve` (not
   `sushi serve`) and `ds4-server` both take `--host`/`--port`, so they now get
   ports from `port_range` and two models on either engine can run side by side.

@@ -261,6 +261,42 @@ func TestOfflinePeer(t *testing.T) {
 	}
 }
 
+// llama-swap's /running, /upstream and /unload work against ai-swap.
+func TestLlamaSwapCompat(t *testing.T) {
+	mac := newNode(t, macCfg)
+	get := func(path string) (int, string) {
+		resp, err := http.Get(mac.url + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, body := get("/running"); code != 200 || !strings.Contains(body, `"running":[]`) {
+		t.Fatalf("running before load: %d %s", code, body)
+	}
+	if code, _ := get("/upstream/qwen/props"); code != http.StatusServiceUnavailable {
+		t.Fatalf("upstream before load: %d", code)
+	}
+	if code, _ := post(t, mac.url+"/api/models/qwen/load", ""); code != 200 {
+		t.Fatalf("load: %d", code)
+	}
+	if code, body := get("/running"); code != 200 || !strings.Contains(body, `"model":"qwen"`) || !strings.Contains(body, `"state":"ready"`) ||
+		!strings.Contains(body, `"cmd":"qwen-backend --port`) {
+		t.Fatalf("running after load: %d %s", code, body)
+	}
+	if code, body := get("/upstream/qwen/props"); code != 200 || !strings.Contains(body, `"path":"/props"`) {
+		t.Fatalf("upstream: %d %s", code, body)
+	}
+	if code, body := get("/unload"); code != 200 || body != "OK" {
+		t.Fatalf("unload: %d %s", code, body)
+	}
+	if code, body := get("/running"); code != 200 || !strings.Contains(body, `"running":[]`) {
+		t.Fatalf("running after unload: %d %s", code, body)
+	}
+}
+
 func TestUnknownModelErrorShapes(t *testing.T) {
 	mac := newNode(t, macCfg)
 	code, out := post(t, mac.url+"/v1/messages", `{"model":"nope"}`)

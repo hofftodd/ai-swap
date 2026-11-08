@@ -11,6 +11,7 @@ import (
 	"net"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -66,6 +67,7 @@ type Instance struct {
 	loadedAt time.Time
 	loadDur  time.Duration
 	pid      int
+	cmd      string // command line of the running process
 }
 
 // Status is a snapshot of an instance for the API/UI.
@@ -87,6 +89,8 @@ type Status struct {
 	LoadedAt    *time.Time `json:"loaded_at,omitempty"`
 	LoadSeconds float64    `json:"load_seconds,omitempty"`
 	PID         int        `json:"pid,omitempty"`
+	// Cmd is the running process's command line.
+	Cmd string `json:"cmd,omitempty"`
 }
 
 // pider is implemented by handles that know their OS process ID.
@@ -339,6 +343,7 @@ func (m *Manager) Snapshot() []Status {
 		if inst.state == Ready || inst.state == Starting {
 			s.Port = inst.port
 			s.PID = inst.pid
+			s.Cmd = inst.cmd
 		}
 		if inst.state == Ready && !inst.loadedAt.IsZero() {
 			t := inst.loadedAt
@@ -482,7 +487,7 @@ func (m *Manager) startLocked(inst *Instance) error {
 		return err
 	}
 	m.mu.Lock()
-	inst.state, inst.port, inst.lastErr = Starting, l.Port, ""
+	inst.state, inst.port, inst.lastErr, inst.cmd = Starting, l.Port, "", strings.Join(l.Argv, " ")
 	m.notifyLocked()
 	m.mu.Unlock()
 

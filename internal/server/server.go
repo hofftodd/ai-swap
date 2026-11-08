@@ -69,6 +69,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/models/{name}/unload", s.handleUnload)
 	mux.HandleFunc("GET /api/models/{name}/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/models/{name}/stats", s.handleStats)
+	mux.HandleFunc("POST /api/unload", s.handleUnloadAll)
+	// llama-swap compatibility (llamaswap.go).
+	mux.HandleFunc("GET /running", s.handleRunning)
+	mux.HandleFunc("GET /unload", s.handleUnloadAll)
+	mux.HandleFunc("POST /unload", s.handleUnloadAll)
+	mux.HandleFunc("GET /upstream/{name}/{path...}", s.handleUpstream)
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}

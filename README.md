@@ -344,6 +344,8 @@ llama.cpp all do.
 | `GET /api/models/{name}/logs` | Last 256 KB of the engine's stdout/stderr |
 | `GET /api/models/{name}/stats` | Live stats for the UI's stats pane: state, load time, process memory, GPU memory (Linux/AMD), what the engine reports about the model (parameters, quantization, context, slots, metrics), and request stats measured by ai-swap (tok/s, time to first token, tokens, draft acceptance) |
 | `GET /health` | Returns `ok` |
+| `POST /api/unload` | Unload every model on this machine (residents stay unloaded until used) |
+| `GET /running`, `GET\|POST /unload`, `GET /upstream/{model}/{path...}` | llama-swap compatibility for this machine's models: loaded models, unload all, and a GET passed straight to a model's engine (e.g. llama.cpp's `/props`) |
 
 Errors use the OpenAI shape (`{"error":{...}}`), except on `/v1/messages*`,
 which use the Anthropic shape (`{"type":"error","error":{...}}`).
