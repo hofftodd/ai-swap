@@ -73,8 +73,9 @@ the problem:
 - **Idle timeout and crash recovery.** Models unload after a configurable
   idle time. A model whose process dies is restarted on the next request.
 - **Built-in chat UI.** Streamed replies, a collapsible "thinking" section
-  for reasoning models, tokens/sec, a memory bar per machine, and
-  load/unload/log buttons for every model.
+  for reasoning models, tokens/sec, a memory bar per machine that shows which
+  models hold the memory, replies labelled with the machine that served them,
+  and load/unload/log buttons for every model.
 - **Single static binary**, YAML config, no database.
 
 ## Supported engines
@@ -369,7 +370,10 @@ WantedBy=multi-user.target
 
 On SIGTERM, ai-swap stops every engine it started before exiting.
 
-**macOS**: run it from a terminal for now. A launchd plist is on the roadmap.
+**macOS (launchd)**: [`examples/ai-swap.plist`](examples/ai-swap.plist) is a
+LaunchAgent that starts ai-swap at login and restarts it if it crashes. Its
+header has the install, restart and remove commands. Logs go to
+`~/Library/Logs/ai-swap.log`.
 
 ## Troubleshooting
 

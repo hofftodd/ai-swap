@@ -18,6 +18,14 @@
   failed forward marks the peer offline at once; a model on an offline peer
   gets `503` with `Retry-After: 10` naming the node instead of `404`.
 - `/v1/models` entries carry `context_length` when the model sets `ctx`.
+- UI pass for several machines: a stacked memory bar per machine showing which
+  models hold the memory (busy and loading ones marked), a one-line cluster
+  summary, model sizes in the sidebar, a Models view with one card per machine
+  (OS, version, online or last seen, memory legend, context, quiet Load
+  buttons and a Chat shortcut), replies labelled with the machine that served
+  them, user turns as right-aligned bubbles and flat assistant replies, a
+  single rounded composer, an empty state that shows what the next message
+  will do, and no empty speed tiles before the first request.
 
 - Claude Code works with strict chat templates (e.g. Qwen 3.8): mid-conversation
   `system` messages in `/v1/messages` requests are folded into the adjacent

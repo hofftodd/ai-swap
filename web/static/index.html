@@ -13,15 +13,17 @@
   --bg: #f7f7f5; --panel: #ffffff; --text: #1d1d1b; --muted: #6b6b66; --faint: #8f8f88;
   --border: #e3e2dd; --accent: #2f6fde; --accent-text: #fff; --accent-soft: #e8effc;
   --user: #eef3fd; --code: #f1f0ec; --ok: #1f8a4c; --warn: #a86b12; --bad: #c53030;
-  --shadow: 0 8px 28px rgb(0 0 0 / .14);
-  --side-w: 268px; --stats-w: 320px;
+  --shadow: 0 8px 28px rgb(0 0 0 / .14); --ring: 0 0 0 3px rgb(47 111 222 / .18);
+  --seg-ready: #2f6fde; --seg-busy: #7c5cd6; --seg-load: #d99a2b;
+  --side-w: 280px; --stats-w: 320px;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --bg: #161615; --panel: #1f1f1d; --text: #ecebe6; --muted: #a3a39b; --faint: #7d7d76;
     --border: #33332f; --accent: #6b9cf5; --accent-text: #0d0d0c; --accent-soft: #233150;
     --user: #22293a; --code: #2a2a27; --ok: #4ccb84; --warn: #e2b04a; --bad: #f07171;
-    --shadow: 0 8px 28px rgb(0 0 0 / .5);
+    --shadow: 0 8px 28px rgb(0 0 0 / .5); --ring: 0 0 0 3px rgb(107 156 245 / .25);
+    --seg-ready: #6b9cf5; --seg-busy: #a48bf0; --seg-load: #e2b04a;
   }
 }
 * { box-sizing: border-box; }
@@ -64,9 +66,11 @@ button.ghost:hover { background: var(--bg); border-color: transparent; }
   border-right: 1px solid var(--border); background: var(--panel);
   display: flex; flex-direction: column; min-height: 0; min-width: 0;
 }
-.side-head { padding: 12px 12px 8px 14px; display: flex; gap: 8px; align-items: center; }
-.side-head h1 { font-size: 16px; margin: 0; flex: 1; display: flex; align-items: baseline; gap: 6px; }
-#ver { font-weight: 400; font-size: 12px; color: var(--muted); }
+.side-head { padding: 14px 12px 6px 14px; display: flex; gap: 8px; align-items: center; }
+.side-head h1 { font-size: 16px; margin: 0; flex: 1; display: flex; align-items: center; gap: 8px; letter-spacing: -.01em; }
+.side-head h1 svg { width: 22px; height: 22px; flex: none; }
+#ver { font-weight: 400; font-size: 12px; color: var(--faint); }
+#cluster { padding: 0 14px 10px; font-size: 12px; color: var(--muted); }
 .filter { margin: 0 10px 6px; position: relative; }
 .filter input {
   width: 100%; padding: 6px 28px 6px 10px; border: 1px solid var(--border); border-radius: 8px;
@@ -88,6 +92,12 @@ button.ghost:hover { background: var(--bg); border-color: transparent; }
 .node-head .nname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-head .nmem { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .node-head .bar { grid-column: 2 / 4; }
+.node-head .tag { font-weight: 400; color: var(--faint); font-size: 11px; margin-left: 4px; }
+.mbar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; display: flex; gap: 1px; }
+.mbar > i { display: block; height: 100%; background: var(--seg-ready); }
+.mbar > i.busy { background: var(--seg-busy); }
+.mbar > i.starting, .mbar > i.stopping { background: repeating-linear-gradient(-45deg, var(--seg-load) 0 4px, color-mix(in srgb, var(--seg-load) 55%, transparent) 4px 8px); }
+.node-head .mbar { grid-column: 2 / 4; }
 .node-head .caret { color: var(--faint); font-size: 10px; width: 8px; transition: transform .15s; }
 .node-head[aria-expanded="false"] .caret { transform: rotate(-90deg); }
 .node-off { color: var(--bad); font-size: 12px; }
@@ -100,6 +110,7 @@ button.ghost:hover { background: var(--bg); border-color: transparent; }
 }
 .model-row .mname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .model-row .state { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.model-row .size { font-size: 12px; color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .model-row .state.bad { color: var(--bad); }
 .row-act { visibility: hidden; position: absolute; right: 6px; top: 50%; transform: translateY(-50%); font-size: 12px; padding: 1px 8px; box-shadow: -10px 0 8px -2px var(--panel); }
 .model-li:hover .row-act { box-shadow: -10px 0 8px -2px var(--bg); }
@@ -133,7 +144,7 @@ main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px 4px 10px; background: var(--panel);
 }
 .chip .cname { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.chip .cstate { color: var(--muted); font-size: 13px; white-space: nowrap; }
+.chip .cstate { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .topbar .spacer { flex: 1; }
 .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex: none; }
 .seg button { border: 0; border-radius: 0; padding: 3px 12px; font-size: 13px; background: var(--panel); }
@@ -144,12 +155,16 @@ main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 #offline { background: var(--bad); color: #fff; font-size: 13px; padding: 4px 12px; text-align: center; }
 #view-chat, #view-models { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 #messages { flex: 1; overflow: auto; padding: 24px 16px 8px; overscroll-behavior: contain; }
-.msg { max-width: 820px; margin: 0 auto 20px; }
-.msg .role { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.msg .body { padding: 10px 14px; border-radius: 10px; overflow-wrap: anywhere; }
-.msg.user .body { background: var(--user); white-space: pre-wrap; }
-.msg.assistant .body { background: var(--panel); border: 1px solid var(--border); }
+.msg { max-width: 800px; margin: 0 auto 22px; }
+.msg .role { font-size: 12px; color: var(--muted); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.msg .role b { color: var(--text); font-weight: 600; }
+.msg .role .on { color: var(--faint); }
+.msg .body { overflow-wrap: anywhere; }
+.msg.user { display: flex; flex-direction: column; align-items: flex-end; }
+.msg.user .body { background: var(--user); white-space: pre-wrap; padding: 9px 14px; border-radius: 16px 16px 4px 16px; max-width: min(88%, 640px); }
+.msg.assistant .body { padding: 0 2px; }
 .msg .meta { font-size: 12px; color: var(--muted); margin-top: 4px; display: flex; gap: 10px; align-items: center; min-height: 22px; flex-wrap: wrap; }
+.msg.user .meta { justify-content: flex-end; }
 .msg .meta .acts { display: inline-flex; gap: 2px; opacity: 0; transition: opacity .1s; }
 .msg:hover .meta .acts, .msg:focus-within .meta .acts, .msg.last .meta .acts { opacity: 1; }
 @media (hover: none) { .msg .meta .acts { opacity: 1; } }
@@ -180,31 +195,71 @@ main { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 details.thinking { margin-bottom: 8px; color: var(--muted); font-size: 14px; }
 details.thinking summary { cursor: pointer; user-select: none; }
 details.thinking .think-text { white-space: pre-wrap; border-left: 2px solid var(--border); padding-left: 10px; margin-top: 4px; max-height: 18em; overflow: auto; }
-.empty { color: var(--muted); text-align: center; margin: 16vh auto 0; max-width: 460px; }
+.empty { color: var(--muted); text-align: center; margin: 14vh auto 0; max-width: 480px; }
 .empty b { color: var(--text); }
-.composer { border-top: 1px solid var(--border); background: var(--panel); padding: 8px 16px calc(10px + env(safe-area-inset-bottom)); }
-.composer .inner { max-width: 820px; margin: 0 auto; }
+.hello { max-width: 520px; margin: 12vh auto 0; text-align: center; }
+.hello .hname { font-size: 26px; font-weight: 650; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.hello .hstate { margin: 6px 0 14px; color: var(--muted); display: inline-flex; gap: 8px; align-items: center; }
+.hello .chips { justify-content: center; }
+.hello .tip { font-size: 13px; color: var(--faint); margin-top: 18px; }
+.hello kbd, .hint kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: var(--panel); }
+.composer { padding: 6px 16px calc(10px + env(safe-area-inset-bottom)); }
+.composer .inner { max-width: 800px; margin: 0 auto; }
 #notice { font-size: 13px; color: var(--muted); padding: 2px 2px 8px; display: flex; gap: 8px; align-items: baseline; }
 #notice b { color: var(--text); font-weight: 600; }
 #notice .ico { color: var(--warn); }
-#form { display: flex; gap: 8px; align-items: flex-end; }
-#input {
-  flex: 1; resize: none; line-height: 1.4; min-height: calc(4.2em + 22px); max-height: 240px; padding: 10px 12px;
-  border-radius: 10px; border: 1px solid var(--border); background: var(--bg);
+#form {
+  display: flex; gap: 8px; align-items: flex-end; padding: 6px 6px 6px 4px;
+  border: 1px solid var(--border); border-radius: 16px; background: var(--panel); box-shadow: 0 1px 3px rgb(0 0 0 / .05);
 }
-.hint { font-size: 11px; color: var(--faint); padding: 4px 2px 0; }
+#form:focus-within { border-color: var(--accent); box-shadow: var(--ring); }
+#input {
+  flex: 1; resize: none; line-height: 1.45; min-height: calc(2.9em + 16px); max-height: 240px; padding: 8px 10px;
+  border: 0; background: none; outline: none;
+}
+#send { border-radius: 11px; padding: 7px 16px; font-weight: 600; }
+#send.stop { background: var(--text); border-color: var(--text); color: var(--bg); }
+.hint { font-size: 11px; color: var(--faint); padding: 5px 4px 0; text-align: center; }
 @media (pointer: coarse) { #input { font-size: 16px; } .hint { display: none; } }
 
-/* ---- models table ---- */
-#view-models { overflow: auto; padding: 16px; }
-table.fleet { border-collapse: collapse; width: 100%; max-width: 1100px; margin: 0 auto; }
-.fleet th, .fleet td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
-.fleet th { color: var(--muted); font-weight: 500; position: sticky; top: -16px; background: var(--bg); }
+/* ---- models view ---- */
+#view-models { overflow: auto; padding: 20px 16px 32px; }
+#fleet { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.fleet-sum { color: var(--muted); font-size: 13px; }
+.ncard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.ncard.off { opacity: .8; }
+.ncard-head { padding: 12px 16px 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+.ncard-head h3 { margin: 0; font-size: 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ncard-head .nsub { color: var(--muted); font-size: 12px; }
+.ncard-head .nmem { text-align: right; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ncard-head .nmem b { color: var(--text); font-weight: 600; }
+.ncard-head .mbar { grid-column: 1 / 3; height: 8px; border-radius: 4px; margin-top: 4px; }
+.legend { grid-column: 1 / 3; display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; gap: 5px; align-items: center; }
+.legend i { width: 9px; height: 9px; border-radius: 2px; background: var(--seg-ready); display: inline-block; }
+.legend i.busy { background: var(--seg-busy); } .legend i.starting { background: var(--seg-load); }
+table.fleet { border-collapse: collapse; width: 100%; table-layout: fixed; }
+.fleet col.c-state { width: 15%; } .fleet col.c-mem { width: 10%; } .fleet col.c-ctx { width: 9%; } .fleet col.c-eng { width: 11%; } .fleet col.c-act { width: 230px; }
+.fleet td:first-child { overflow-wrap: anywhere; }
+.fleet th, .fleet td { text-align: left; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 14px; vertical-align: middle; }
+.fleet th { color: var(--faint); font-weight: 500; font-size: 12px; padding-top: 6px; padding-bottom: 6px; }
+.fleet tr.up td:first-child { box-shadow: inset 3px 0 0 var(--seg-ready); }
+.fleet td.act { text-align: right; white-space: nowrap; }
+.fleet td.num { font-variant-numeric: tabular-nums; }
+.fleet .mn { font-weight: 500; }
+.fleet .dot.inl { display: none; }
 .fleet td.nw { white-space: nowrap; }
 .fleet .state { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
 .fleet .sub { color: var(--muted); font-size: 12px; }
 .fleet .errtxt { color: var(--bad); font-size: 12px; }
-.fleet .node-row td { font-weight: 600; background: var(--bg); color: var(--muted); font-size: 13px; }
+@media (max-width: 760px) {
+  .fleet .hide-n { display: none; }
+  .fleet col.c-act { width: 124px; }
+  .fleet .hide-s, .fleet .sub.al { display: none; }
+  .fleet .dot.inl { display: inline-block; margin-right: 6px; vertical-align: 1px; }
+  .fleet td.act .ghost[data-act="logs"] { display: none; }
+  .fleet th, .fleet td { padding-left: 12px; padding-right: 12px; }
+}
 
 /* ---- stats pane ---- */
 #stats {
@@ -279,9 +334,10 @@ dialog#logs::backdrop { background: rgb(0 0 0 / .35); }
 <body>
 <aside id="side" aria-label="Models and chats">
   <div class="side-head">
-    <h1>ai-swap <span id="ver"></span></h1>
+    <h1><svg viewBox="0 0 64 64" aria-hidden="true"><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b7bff"/><stop offset="1" stop-color="#7a4cf0"/></linearGradient></defs><rect width="64" height="64" rx="14" fill="url(#lg)"/><g fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 27a17 17 0 0 1 29-9.5L48.5 22"/><path d="M48.5 11.5V22H38"/><path d="M48.5 37a17 17 0 0 1-29 9.5L15.5 42"/><path d="M15.5 52.5V42H26"/></g><circle cx="32" cy="32" r="5" fill="#fff"/></svg>ai-swap <span id="ver"></span></h1>
     <button class="ghost small close-btn" data-close aria-label="Close menu">✕</button>
   </div>
+  <div id="cluster" aria-live="polite"></div>
   <div class="filter">
     <label class="sr-only" for="filter">Filter models</label>
     <input id="filter" type="search" placeholder="Filter models" autocomplete="off" spellcheck="false">
@@ -316,16 +372,13 @@ dialog#logs::backdrop { background: rgb(0 0 0 / .35); }
           <textarea id="input" rows="3" aria-label="Message" placeholder="Message…"></textarea>
           <button class="primary" id="send" type="submit">Send</button>
         </form>
-        <div class="hint">Enter to send · Shift+Enter for a new line · Esc to stop</div>
+        <div class="hint"><kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <kbd>Esc</kbd> stop · <kbd>/</kbd> models</div>
       </div>
     </div>
   </section>
 
   <section id="view-models" class="hidden" role="tabpanel" aria-labelledby="tabModels">
-    <table class="fleet">
-      <thead><tr><th>Model</th><th>State</th><th>Memory</th><th>Engine</th><th></th></tr></thead>
-      <tbody id="fleetRows"></tbody>
-    </table>
+    <div id="fleet"></div>
   </section>
 </main>
 
@@ -514,11 +567,12 @@ function list(lines, start) {
 function buildFleet() {
   nodes = []; fleet = [];
   if (!status) return;
-  const addNode = (name, local, online, n, err) => nodes.push({
+  const addNode = (name, local, online, n, err, seen) => nodes.push({
     name, local, online, error: err, budget: n?.memory_budget_gb || 0, used: n?.memory_used_gb || 0, models: n?.models || [],
+    version: n?.version || "", os: n?.os || "", arch: n?.arch || "", seen,
   });
   addNode(status.node.name, true, true, status.node);
-  for (const p of status.peers || []) addNode(p.name, false, !!(p.online && p.node), p.node, p.error);
+  for (const p of status.peers || []) addNode(p.name, false, !!(p.online && p.node), p.node, p.error, p.last_seen);
   const now = Date.now();
   for (const nd of nodes) for (const m of nd.models) {
     if (!m.runnable) continue;
@@ -545,6 +599,20 @@ function stateWord(m) {
   return { text: "", cls: "" };
 }
 const isUp = (m) => !!m && (m.state === "ready" || m.state === "starting");
+const gb = (v) => v ? (v >= 10 ? v.toFixed(0) : v.toFixed(1).replace(/\.0$/, "")) + " GB" : "";
+const segClass = (m) => m.state === "ready" ? (m.inflight ? "busy" : "") : m.state;
+// One segment per model holding memory, so you can see what a swap would push out.
+function memBar(nd) {
+  const total = nd.budget || nd.models.reduce((t, m) => t + (isUp(m) || m.state === "stopping" ? m.memory_gb || 0 : 0), 0) || 1;
+  const segs = nd.models.filter(m => isUp(m) || m.state === "stopping")
+    .map(m => `<i class="${segClass(m)}" style="width:${Math.min(100, 100 * (m.memory_gb || 0) / total).toFixed(2)}%" title="${esc(m.name)}: ${gb(m.memory_gb)}${m.inflight ? ", busy" : m.state === "ready" ? "" : ", " + m.state}"></i>`).join("");
+  return `<span class="mbar" role="img" aria-label="${esc(nd.name)} memory: ${nd.used.toFixed(0)} of ${nd.budget ? nd.budget.toFixed(0) + " GB" : "unlimited"} reserved">${segs}</span>`;
+}
+function age(t) {
+  if (!t) return "";
+  const s = (Date.now() - Date.parse(t)) / 1000;
+  return s < 90 ? Math.round(s) + " s" : s < 5400 ? Math.round(s / 60) + " min" : Math.round(s / 3600) + " h";
+}
 
 // ---- sidebar -----------------------------------------------------------
 
@@ -557,11 +625,10 @@ function renderModelList() {
       .sort((a, b) => (isUp(b) - isUp(a)) || a.name.localeCompare(b.name));
     if (q && !list.length) continue;
     const open = !!q || !collapsed.has(nd.name);
-    const pct = nd.budget ? Math.min(100, 100 * nd.used / nd.budget) : 0;
     html += `<button class="node-head" data-node="${esc(nd.name)}" data-k="node:${esc(nd.name)}" aria-expanded="${open}" title="${esc(nd.name)}${nd.online ? "" : ": offline"}">
-      <span class="caret" aria-hidden="true">▾</span><span class="nname">${esc(nd.name)}</span>
+      <span class="caret" aria-hidden="true">▾</span><span class="nname">${esc(nd.name)}${multi && nd.local ? `<span class="tag">this machine</span>` : ""}</span>
       ${nd.online ? `<span class="nmem">${nd.used.toFixed(0)} / ${nd.budget ? nd.budget.toFixed(0) : "∞"} GB</span>
-      <span></span><span class="bar" aria-hidden="true"><div style="width:${pct}%"></div></span>` : `<span class="node-off">offline</span>`}</button>`;
+      <span></span>${memBar(nd)}` : `<span class="node-off">offline</span>`}</button>`;
     if (!open) continue;
     if (!nd.online) { html += `<div class="side-empty">${esc(nd.error || "Not reachable")}</div>`; continue; }
     for (const m of list) {
@@ -572,7 +639,8 @@ function renderModelList() {
         <button class="model-row" data-model="${esc(m.id)}" data-k="m:${esc(m.id)}" tabindex="${m.id === selected ? 0 : -1}" aria-current="${m.id === selected}" title="${esc(m.id)} on ${esc(m.node)}">
           <span class="dot ${esc(m.state)}" aria-hidden="true"></span><span class="mname">${esc(name)}</span>
           ${m.resident ? `<span class="pill" title="Kept loaded by default; gives way when another model needs the memory">resident</span>` : ""}
-          ${w.text ? `<span class="state ${w.cls}">${esc(w.text)}</span>` : ""}
+          ${w.text && w.cls !== "quiet" ? `<span class="state ${w.cls}">${esc(w.text)}</span>` : `<span class="size">${gb(m.memory_gb)}</span>`}
+          <span class="sr-only">${esc(w.text || "not loaded")}</span>
         </button>
         <button class="small row-act${p ? " pending" : ""}" tabindex="-1" data-act="${isUp(m) ? "unload" : "load"}" data-ref="${esc(m.id)}" ${p ? "disabled" : ""} aria-label="${act} ${esc(m.id)}">${act}</button>
       </div>`;
@@ -580,6 +648,8 @@ function renderModelList() {
   }
   if (!html) html = `<div class="side-empty">${status ? (q ? "No models match." : "No models configured.") : "Connecting…"}</div>`;
   setHTML($("modelList"), html);
+  const up = fleet.filter(isUp).length, on = nodes.filter(n => n.online).length;
+  setHTML($("cluster"), status ? `${on === nodes.length ? nodes.length : `${on} of ${nodes.length}`} machine${nodes.length === 1 ? "" : "s"} online · ${fleet.length} models · ${up} loaded` : "");
 }
 
 function renderChats() {
@@ -643,14 +713,17 @@ function msgEl(m, idx) {
   el.className = "msg " + m.role;
   el.dataset.i = idx;
   if (m.role === "user") {
-    el.innerHTML = `<div class="role">You</div><div class="body"></div>
+    el.innerHTML = `<div class="body"></div>
       <div class="meta"><span class="acts"><button class="ghost" data-msg="copy">Copy</button><button class="ghost" data-msg="edit">Edit</button></span></div>`;
     el.querySelector(".body").textContent = m.content;
     return el;
   }
   el.innerHTML = `<div class="role"></div><div class="body"><details class="thinking hidden"><summary></summary><div class="think-text"></div></details><div class="content"></div><div class="err"></div></div>
     <div class="meta"><span class="mtext"></span><span class="acts"><button class="ghost" data-msg="copy">Copy</button><button class="ghost" data-msg="retry">Retry</button></span></div>`;
-  el.querySelector(".role").textContent = m.model || "assistant";
+  const node = m.node || info(m.model)?.node;
+  const showNode = node && nodes.length > 1;
+  const label = showNode ? String(m.model || "").split("@")[0] : m.model; // "x@node" + "on node" says it twice
+  el.querySelector(".role").innerHTML = `<b>${esc(label || "assistant")}</b>${showNode ? `<span class="on">on ${esc(node)}</span>` : ""}`;
   // Remember the user's own open/closed choice; our updates don't count.
   el.querySelector("summary").addEventListener("click", () => {
     const det = el.querySelector("details");
@@ -693,9 +766,14 @@ function renderMessages() {
   box.innerHTML = "";
   if (!c || !c.messages.length) {
     const m = info(selected);
-    box.innerHTML = `<div class="empty">${m
-      ? `Chatting with <b>${esc(m.id)}</b>${m.state === "ready" ? ", loaded and ready." : m.state === "starting" ? ", which is loading now." : `. It isn't loaded yet; your first message loads it${m.load_seconds ? ` (about ${Math.round(m.load_seconds)} s last time)` : ""}.`}<br><br>Pick a different model on the left any time.`
-      : status ? "Pick a model on the left to start." : "Connecting to ai-swap…"}</div>`;
+    if (!m) { box.innerHTML = `<div class="empty">${status ? "Pick a model on the left to start." : "Connecting to ai-swap…"}</div>`; return; }
+    const st = m.state === "ready" ? "Loaded and ready" : m.state === "starting" ? "Loading now" : m.state === "failed" ? "Failed to load last time" :
+      `Not loaded: your first message loads it${m.load_seconds ? ` (about ${Math.round(m.load_seconds)} s last time)` : ""}`;
+    const chips = [nodes.length > 1 && "on " + m.node, m.engine, m.memory_gb && gb(m.memory_gb), m.ctx && fmtTok(m.ctx) + " context", m.resident && "resident"].filter(Boolean);
+    box.innerHTML = `<div class="hello"><div class="hname">${esc(m.id)}</div>
+      <div class="hstate"><span class="dot ${esc(m.state)}"></span>${esc(st)}</div>
+      <div class="chips">${chips.map(x => `<span>${esc(x)}</span>`).join("")}</div>
+      <div class="tip">Press <kbd>/</kbd> to switch models. Chats stay in this browser.</div></div>`;
     return;
   }
   c.messages.forEach((m, i) => box.appendChild(msgEl(m, i)));
@@ -709,22 +787,37 @@ function render() { renderChats(); renderModelList(); renderTop(); renderMessage
 
 function renderFleet() {
   if ($("view-models").classList.contains("hidden")) return;
-  const multi = nodes.length > 1;
-  let html = "";
+  const up = fleet.filter(isUp).length;
+  let html = `<div class="fleet-sum">${nodes.length} machine${nodes.length === 1 ? "" : "s"} · ${fleet.length} models · ${up} loaded. Every model is reachable from any machine; ids ending in <code>@machine</code> pick a copy on a specific one.</div>`;
   for (const nd of nodes) {
-    if (multi) html += `<tr class="node-row"><td colspan="5">${esc(nd.name)} ${nd.online ? `· ${nd.used.toFixed(0)} / ${nd.budget ? nd.budget.toFixed(0) : "∞"} GB` : "· offline"}</td></tr>`;
-    for (const m of fleet.filter(x => x.node === nd.name)) {
-      const w = stateWord(m), p = pending.get(m.id), up = isUp(m);
-      html += `<tr>
-        <td>${esc(m.name)} ${m.resident ? `<span class="pill">resident</span>` : ""}${m.aliases?.length ? `<div class="sub">${esc(m.aliases.join(", "))}</div>` : ""}</td>
-        <td class="nw"><span class="state"><span class="dot ${esc(m.state)}"></span>${esc(w.text || (m.state === "stopped" ? "not loaded" : m.state))}</span>${m.error ? `<div class="errtxt">${esc(m.error)}</div>` : ""}</td>
-        <td class="nw">${m.memory_gb ? m.memory_gb + " GB" : "—"}</td>
-        <td class="nw">${esc(m.engine)}</td>
-        <td class="nw"><button class="small${up ? "" : " primary"}" data-act="${up ? "unload" : "load"}" data-ref="${esc(m.id)}" data-k="t:${esc(m.id)}" ${p ? "disabled" : ""}>${p ? (p === "load" ? "Loading…" : "Unloading…") : up ? "Unload" : "Load"}</button>
-          <button class="small" data-act="logs" data-ref="${esc(m.id)}" data-k="tl:${esc(m.id)}">Logs</button></td></tr>`;
+    const list = fleet.filter(x => x.node === nd.name).sort((a, b) => (isUp(b) - isUp(a)) || a.name.localeCompare(b.name));
+    const facts = [nd.local ? "this machine" : "peer", nd.os && `${nd.os}/${nd.arch}`, nd.version && "v" + nd.version,
+      !nd.online && (nd.seen ? `offline, last seen ${age(nd.seen)} ago` : "offline")].filter(Boolean).join(" · ");
+    const busyLegend = nd.models.some(m => m.state === "ready" && m.inflight), loadLegend = nd.models.some(m => m.state === "starting");
+    html += `<section class="ncard${nd.online ? "" : " off"}" aria-label="${esc(nd.name)}">
+      <div class="ncard-head"><div><h3><span class="dot ${nd.online ? "ready" : "failed"}"></span>${esc(nd.name)}</h3><div class="nsub">${esc(facts)}</div></div>
+        ${nd.online ? `<div class="nmem"><b>${nd.used.toFixed(0)}</b> / ${nd.budget ? nd.budget.toFixed(0) + " GB" : "∞"} reserved</div>${memBar(nd)}
+        <div class="legend">${nd.models.filter(m => isUp(m)).map(m => `<span><i class="${segClass(m)}"></i>${esc(m.name)} ${gb(m.memory_gb)}</span>`).join("") || "<span>Nothing loaded</span>"}
+          ${busyLegend ? `<span><i class="busy"></i>busy</span>` : ""}${loadLegend ? `<span><i class="starting"></i>loading</span>` : ""}</div>` : `<div class="nmem">${esc(nd.error || "")}</div>`}</div>`;
+    if (nd.online && list.length) {
+      html += `<table class="fleet"><colgroup><col><col class="c-state hide-s"><col class="c-mem hide-n"><col class="c-ctx hide-n"><col class="c-eng hide-n"><col class="c-act"></colgroup><thead><tr><th>Model</th><th class="hide-s">State</th><th class="hide-n">Memory</th><th class="hide-n">Context</th><th class="hide-n">Engine</th><th></th></tr></thead><tbody>`;
+      for (const m of list) {
+        const w = stateWord(m), p = pending.get(m.id), isup = isUp(m);
+        html += `<tr class="${isup ? "up" : ""}">
+          <td><span class="dot inl ${esc(m.state)}" aria-hidden="true"></span><span class="mn">${esc(m.name)}</span> ${m.resident ? `<span class="pill">resident</span>` : ""}${m.id !== m.name ? `<div class="sub">id ${esc(m.id)}</div>` : ""}${m.aliases?.length ? `<div class="sub al">aliases: ${esc(m.aliases.join(", "))}</div>` : ""}</td>
+          <td class="nw hide-s"><span class="state"><span class="dot ${esc(m.state)}"></span>${esc(w.text || (m.state === "stopped" ? "not loaded" : m.state))}</span>${m.error ? `<div class="errtxt">${esc(m.error)}</div>` : ""}</td>
+          <td class="nw num hide-n">${m.memory_gb ? gb(m.memory_gb) : "—"}</td>
+          <td class="nw num hide-n">${m.ctx ? fmtTok(m.ctx) : "—"}</td>
+          <td class="nw hide-n">${esc(m.engine)}</td>
+          <td class="act"><button class="small" data-act="${isup ? "unload" : "load"}" data-ref="${esc(m.id)}" data-k="t:${esc(m.id)}" ${p ? "disabled" : ""}>${p ? (p === "load" ? "Loading…" : "Unloading…") : isup ? "Unload" : "Load"}</button>
+            <button class="small ghost" data-act="logs" data-ref="${esc(m.id)}" data-k="tl:${esc(m.id)}">Logs</button>
+            <button class="small ghost" data-act="chat" data-ref="${esc(m.id)}" data-k="tc:${esc(m.id)}">Chat</button></td></tr>`;
+      }
+      html += `</tbody></table>`;
     }
+    html += `</section>`;
   }
-  setHTML($("fleetRows"), html || `<tr><td colspan="5">No models.</td></tr>`);
+  setHTML($("fleet"), html);
 }
 
 // ---- load / unload / logs ----------------------------------------------------
@@ -825,12 +918,12 @@ function renderStats(id, d) {
 
   // Headline numbers: generation, prompt processing, time to first token.
   const ttft = last?.ttft_seconds ? fmtSecs(last.ttft_seconds).split(" ") : null;
-  h += `<div class="kpis">
+  if (q.requests) h += `<div class="kpis">
     <div class="kpi"><div class="label">Generate</div><div class="big">${fmtTPS(last?.gen_tps)}<small> t/s</small></div><div class="subv">${q.avg_gen_tps ? "avg " + fmtTPS(q.avg_gen_tps) : "&nbsp;"}</div></div>
     <div class="kpi"><div class="label">Prompt</div><div class="big">${fmtTPS(last?.prompt_tps || q.avg_prompt_tps)}<small> t/s</small></div><div class="subv">${q.avg_prompt_tps ? "avg " + fmtTPS(q.avg_prompt_tps) : "&nbsp;"}</div></div>
     <div class="kpi"><div class="label">First token</div><div class="big">${ttft ? `${ttft[0]}<small> ${ttft[1]}</small>` : "—"}</div><div class="subv">${q.avg_ttft_seconds ? "avg " + fmtSecs(q.avg_ttft_seconds) : "&nbsp;"}</div></div>
   </div>`;
-  if (!q.requests) h += `<div class="lastrun">No requests through ai-swap since it started.</div>`;
+  if (!q.requests) h += `<div class="note" style="margin:14px 0 6px">No requests through ai-swap since it started. Speeds appear here after the first reply.</div>`;
   else if (!ready) h += `<div class="lastrun">From the last run; the model isn't loaded now.</div>`;
   h += spark(q.recent_gen_tps);
 
@@ -845,7 +938,10 @@ function renderStats(id, d) {
   // One memory bar: the main GPU if the OS reports it, else the node's plan.
   const gpu = (d.gpus || [])[0];
   if (gpu) h += meter(`GPU memory${gpu.busy_percent !== undefined ? ` · ${gpu.busy_percent}% busy` : ""}`, gpu.vram_used_bytes, gpu.vram_total_bytes);
-  else h += meter("Reserved on " + esc(d.node), c.node_used_gb * GB, (c.node_budget_gb || c.node_used_gb || 1) * GB, `${c.node_used_gb.toFixed(0)} / ${c.node_budget_gb ? c.node_budget_gb.toFixed(0) : "∞"} GB`);
+  else {
+    const nd = nodes.find(n => n.name === d.node);
+    h += `<div class="meter"><div class="row"><span>Reserved on ${esc(d.node)}</span><span>${c.node_used_gb.toFixed(0)} / ${c.node_budget_gb ? c.node_budget_gb.toFixed(0) : "∞"} GB</span></div>${nd ? memBar(nd) : ""}</div>`;
+  }
 
   if (q.requests) h += `<div class="reqline">${q.requests} request${q.requests === 1 ? "" : "s"}${q.errors ? ` (${q.errors} failed)` : ""} · ${fmtCount(q.prompt_tokens)} in / ${fmtCount(q.completion_tokens)} out</div>`;
   if (last?.gen_tps_source === "measured") h += `<div class="note">Last speed measured from the stream (the engine sent no timings for that request).</div>`;
@@ -906,9 +1002,10 @@ async function refresh() {
     status = await sr.json();
     failures = 0; $("offline").classList.add("hidden");
     $("ver").textContent = status.node.version ? "v" + status.node.version : "";
+    const first = !nodes.length;
     buildFleet();
     renderModelList(); renderTop(); renderFleet();
-    if (!current() || !current().messages.length) renderMessages();
+    if (first || !current() || !current().messages.length) { if (!streaming) renderMessages(); }
     refreshStats();
   } catch (e) {
     if (++failures >= 2) $("offline").classList.remove("hidden");
@@ -968,7 +1065,7 @@ async function send(text, { retry = false } = {}) {
   }
   const m0 = info(model);
   const loading = !!m0 && m0.state !== "ready";
-  const reply = { role: "assistant", model, content: "", thinking: "", streaming: true,
+  const reply = { role: "assistant", model, node: m0?.node, content: "", thinking: "", streaming: true,
     phase: loading ? `Loading ${model}…` : "Waiting for the first token…" };
   c.messages.push(reply);
   streaming = { chatId: c.id, reply };
@@ -995,7 +1092,7 @@ async function send(text, { retry = false } = {}) {
   }, 1000);
 
   abort = new AbortController();
-  $("send").textContent = "Stop";
+  $("send").textContent = "Stop"; $("send").classList.add("stop");
   renderTop();
   let tFirst = 0, chunks = 0, usage = null;
   try {
@@ -1057,7 +1154,7 @@ async function send(text, { retry = false } = {}) {
     delete reply.streaming;
     save();
     if (el.isConnected) { fillAssistant(el, reply); if (stick) box.scrollTop = box.scrollHeight; }
-    $("send").textContent = "Send";
+    $("send").textContent = "Send"; $("send").classList.remove("stop");
     $("live").textContent = reply.error ? "Reply failed: " + reply.error : reply.stopped ? "Reply stopped." : "Reply finished.";
     renderTop(); renderChats();
     refresh();
@@ -1076,7 +1173,7 @@ function showView(which) {
   $("view-chat").classList.toggle("hidden", isModels);
   $("tabChat").setAttribute("aria-selected", String(!isModels));
   $("tabModels").setAttribute("aria-selected", String(isModels));
-  if (isModels) { $("fleetRows")._html = null; renderFleet(); } else renderMessages();
+  if (isModels) { $("fleet")._html = null; renderFleet(); } else renderMessages();
 }
 
 // ---- events ------------------------------------------------------------------------
@@ -1169,10 +1266,12 @@ $("stats").addEventListener("click", (e) => {
   if (b.dataset.act === "logs") openLogs(selected); else modelAction(selected, b.dataset.act);
 });
 $("stats").addEventListener("toggle", (e) => { if (e.target.id === "statsMore") store.set("aiswap.statsMore", e.target.open); }, true);
-$("fleetRows").addEventListener("click", (e) => {
+$("fleet").addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]");
   if (!b) return;
-  if (b.dataset.act === "logs") openLogs(b.dataset.ref); else modelAction(b.dataset.ref, b.dataset.act);
+  if (b.dataset.act === "logs") openLogs(b.dataset.ref);
+  else if (b.dataset.act === "chat") { showView("chat"); selectModel(b.dataset.ref); }
+  else modelAction(b.dataset.ref, b.dataset.act);
 });
 $("side").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeDrawers(); });
 $("chip").onclick = () => {

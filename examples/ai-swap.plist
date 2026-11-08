@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- ai-swap as a macOS LaunchAgent: starts at login, restarts if it crashes.
+     Replace YOU with your user name, then:
+       cp ai-swap.plist ~/Library/LaunchAgents/com.github.hofftodd.ai-swap.plist
+       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.github.hofftodd.ai-swap.plist
+     Restart after a rebuild or config change:
+       launchctl kickstart -k gui/$(id -u)/com.github.hofftodd.ai-swap
+     Remove:
+       launchctl bootout gui/$(id -u)/com.github.hofftodd.ai-swap -->
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.github.hofftodd.ai-swap</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOU/.local/bin/ai-swap</string>
+    <string>-config</string><string>/Users/YOU/.config/ai-swap/config.yaml</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <!-- ai-swap stops every engine on SIGTERM (15 s grace each, in parallel). -->
+  <key>ExitTimeOut</key><integer>60</integer>
+  <key>EnvironmentVariables</key>
+  <dict><key>PATH</key><string>/Users/YOU/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>StandardOutPath</key><string>/Users/YOU/Library/Logs/ai-swap.log</string>
+  <key>StandardErrorPath</key><string>/Users/YOU/Library/Logs/ai-swap.log</string>
+</dict>
+</plist>

@@ -395,5 +395,5 @@ Roughly in priority order:
    large one.
 8. **UI.** Full Markdown (lists, tables), image input, system prompt,
    sampling parameters, export, and live log streaming.
-9. **Packaging.** launchd plist, systemd unit, release binaries for
+9. **Packaging.** (A launchd plist is in `examples/`.) Systemd unit, release binaries for
    darwin/arm64, linux/amd64 and linux/arm64, and config hot-reload.
