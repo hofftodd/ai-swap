@@ -145,15 +145,27 @@ func (c *Cluster) Refresh(base *url.URL) {
 	}
 }
 
-// NewTransport returns the HTTP transport used for peers and engines. It
-// bounds the time to connect: a peer whose hostname also resolves to an
-// address that silently drops packets (an IPv6 address behind a firewall, a
-// stale mDNS entry) would otherwise hang each new connection until the OS
-// gives up, about 20-75 s, instead of failing over or failing fast. It sets
-// no response-header timeout: prefill on a huge prompt can take minutes.
+// NewTransport returns the HTTP transport used for peers and engines.
+//
+// It tries IPv4 first and falls back to any address family. On a LAN with
+// mDNS names, IPv6 tends to be the broken half: a host that publishes IPv6
+// addresses the network won't deliver hangs each new connection, and a host
+// with IPv6 turned off makes macOS wait 5 s for an AAAA answer that never
+// comes (longer than a peer poll allows). Asking for IPv4 alone avoids both.
+//
+// Connecting is bounded to 3 s, so a dead peer fails fast. There is no
+// response-header timeout: prefill on a huge prompt can take minutes.
 func NewTransport() *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.DialContext = (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext
+	d := &net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
+	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if network == "tcp" {
+			if c, err := d.DialContext(ctx, "tcp4", addr); err == nil {
+				return c, nil
+			}
+		}
+		return d.DialContext(ctx, network, addr)
+	}
 	t.ResponseHeaderTimeout = 0
 	t.MaxIdleConnsPerHost = 32 // several agents streaming through one peer
 	return t
