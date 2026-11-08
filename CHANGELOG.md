@@ -30,7 +30,7 @@
   them, user turns as right-aligned bubbles and flat assistant replies, a
   single rounded composer, an empty state that shows what the next message
   will do, and no empty speed tiles before the first request.
-- A new logo (a brain between the swap arrows) and a small server icon next
+- A new logo (a brain between the swap arrows) and a small workstation icon next
   to each machine in the sidebar, red when the machine is offline.
 
 - Claude Code works with strict chat templates (e.g. Qwen 3.8): mid-conversation
