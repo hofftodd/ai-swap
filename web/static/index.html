@@ -238,6 +238,13 @@ details.thinking .think-text { white-space: pre-wrap; border-left: 2px solid var
 a.btn { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; color: inherit; text-decoration: none; display: inline-block; }
 a.btn:hover { border-color: var(--muted); }
 a.btn.small { padding: 2px 9px; font-size: 13px; }
+.hw { border-top: 1px solid var(--border); padding: 6px 16px 10px; font-size: 13px; }
+.hw summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; padding: 2px 0; }
+.hw dl { display: grid; grid-template-columns: max-content 1fr; gap: 3px 14px; margin: 6px 0 0; }
+.hw dt { color: var(--muted); white-space: nowrap; }
+.hw dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .hw dl { grid-template-columns: 1fr; } .hw dt { margin-top: 4px; } }
+.pill.role { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); font-weight: 500; }
 .ncard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .ncard.off { opacity: .8; }
 .ncard-head { padding: 12px 16px 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
@@ -582,9 +589,12 @@ function buildFleet() {
   const addNode = (name, local, online, n, err, seen) => nodes.push({
     name, local, online, error: err, budget: n?.memory_budget_gb || 0, used: n?.memory_used_gb || 0, models: n?.models || [],
     version: n?.version || "", os: n?.os || "", arch: n?.arch || "", seen, lock: n?.lock || null,
+    role: n?.role || "", hw: n?.hardware || null,
   });
   addNode(status.node.name, true, true, status.node);
   for (const p of status.peers || []) addNode(p.name, false, !!(p.online && p.node), p.node, p.error, p.last_seen);
+  // A machine with a role (e.g. "ai-factory host") is listed first; then this one, then peers.
+  nodes.sort((a, b) => (!!b.role - !!a.role) || (b.local - a.local));
   const now = Date.now();
   for (const nd of nodes) for (const m of nd.models) {
     if (!m.runnable) continue;
@@ -627,6 +637,47 @@ function lockText(l) {
   const at = new Date(l.since).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return `Reserved by ${l.owner}${l.reason ? ` (${l.reason})` : ""} since ${at}. Requests from anyone else are refused until it's released.`;
 }
+// ---- hardware (each machine's /api/node "hardware") -------------------------------------
+const bytes = (b) => b ? gb(b / 2 ** 30) : "";
+const num = (v, unit, digits = 0) => v == null ? "" : `${(+v).toFixed(digits)} ${unit}`.trim();
+const span = (secs) => {
+  if (!secs) return "";
+  const d = Math.floor(secs / 86400), h = Math.floor(secs % 86400 / 3600), m = Math.floor(secs % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+};
+function hwRows(hw) {
+  const rows = [];
+  const row = (k, ...parts) => { const v = parts.filter(Boolean).join(" · "); if (v) rows.push([k, v]); };
+  row("System", hw.model, hw.os, hw.kernel, hw.arch, hw.uptime_seconds && `up ${span(hw.uptime_seconds)}`);
+  const c = hw.cpu || {};
+  row("CPU", c.name,
+    c.cores && (c.performance_cores ? `${c.cores} cores (${c.performance_cores}P + ${c.efficiency_cores}E)` : `${c.cores} cores / ${c.threads} threads`),
+    c.max_mhz && `${(c.max_mhz / 1000).toFixed(1)} GHz`, c.busy_percent != null && `${c.busy_percent.toFixed(0)}% busy`,
+    num(c.temp_c, "°C"), num(c.watts, "W", 1));
+  if (hw.load?.length) row("Load", hw.load.map(v => v.toFixed(2)).join(" / ") + " (1/5/15 min)");
+  const used = hw.mem_total_bytes - (hw.mem_available_bytes || 0);
+  row(hw.unified_memory ? "Memory (unified)" : "Memory", hw.mem_total_bytes && `${bytes(used)} used of ${bytes(hw.mem_total_bytes)}`,
+    hw.swap_total_bytes && `swap ${bytes(hw.swap_used_bytes) || "0 GB"} of ${bytes(hw.swap_total_bytes)}`);
+  for (const g of hw.gpus || []) {
+    row(hw.gpus.length > 1 ? `GPU · ${g.name}` : "GPU", hw.gpus.length > 1 ? "" : g.name, g.cores && `${g.cores} cores`,
+      !hw.unified_memory && g.vram_total_bytes && `${bytes(g.vram_used_bytes) || "0 GB"} of ${bytes(g.vram_total_bytes)} VRAM`,
+      g.busy_percent != null && `${g.busy_percent}% busy`,
+      g.watts != null && (g.watts_cap ? `${g.watts.toFixed(0)} / ${g.watts_cap.toFixed(0)} W` : num(g.watts, "W")),
+      g.temp_c != null && (g.junction_temp_c != null ? `${g.temp_c.toFixed(0)}°C (junction ${g.junction_temp_c.toFixed(0)}°C)` : num(g.temp_c, "°C")),
+      g.clock_mhz && `${g.clock_mhz} MHz`, g.fan_rpm && `fan ${g.fan_rpm} rpm`, g.driver);
+  }
+  const pw = hw.power || {};
+  row("Power", pw.source === "ac" ? "on AC power" : pw.source === "battery" ? "on battery" : "",
+    pw.battery_percent != null && `battery ${pw.battery_percent}%`, pw.note);
+  return rows;
+}
+function hwSection(nd) {
+  if (!nd.hw) return "";
+  const open = store.get("aiswap.hw." + nd.name, true);
+  return `<details class="hw" data-hw="${esc(nd.name)}" data-k="hw:${esc(nd.name)}"${open ? " open" : ""}><summary>Hardware</summary><dl>${
+    hwRows(nd.hw).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("")}</dl></details>`;
+}
+
 function age(t) {
   if (!t) return "";
   const s = (Date.now() - Date.parse(t)) / 1000;
@@ -835,11 +886,12 @@ function renderFleet() {
       !nd.online && (nd.seen ? `offline, last seen ${age(nd.seen)} ago` : "offline")].filter(Boolean).join(" · ");
     const busyLegend = nd.models.some(m => m.state === "ready" && m.inflight), loadLegend = nd.models.some(m => m.state === "starting");
     html += `<section class="ncard${nd.online ? "" : " off"}" aria-label="${esc(nd.name)}">
-      <div class="ncard-head"><div><h3><span class="dot ${nd.online ? "ready" : "failed"}"></span>${esc(nd.name)}</h3><div class="nsub">${esc(facts)}</div></div>
+      <div class="ncard-head"><div><h3><span class="dot ${nd.online ? "ready" : "failed"}"></span>${esc(nd.name)}${nd.role ? ` <span class="pill role">${esc(nd.role)}</span>` : ""}</h3><div class="nsub">${esc(facts)}</div></div>
         ${nd.lock ? `<div class="resv" role="note"><span>${esc(lockText(nd.lock))}</span><button class="small" data-act="release" data-ref="${esc(nd.name)}" data-k="rl:${esc(nd.name)}" title="Release it now, e.g. if the benchmark crashed">Release</button></div>` : ""}
         ${nd.online ? `<div class="nmem"><b>${nd.used.toFixed(0)}</b> / ${nd.budget ? nd.budget.toFixed(0) + " GB" : "∞"} reserved</div>${memBar(nd)}
         <div class="legend">${nd.models.filter(m => isUp(m)).map(m => `<span><i class="${segClass(m)}"></i>${esc(m.name)} ${gb(m.memory_gb)}</span>`).join("") || "<span>Nothing loaded</span>"}
           ${busyLegend ? `<span><i class="busy"></i>busy</span>` : ""}${loadLegend ? `<span><i class="starting"></i>loading</span>` : ""}</div>` : `<div class="nmem">${esc(nd.error || "")}</div>`}</div>`;
+    if (nd.online) html += hwSection(nd);
     if (nd.online && list.length) {
       html += `<table class="fleet"><colgroup><col><col class="c-state hide-s"><col class="c-mem hide-n"><col class="c-ctx hide-n"><col class="c-eng hide-n"><col class="c-act"></colgroup><thead><tr><th>Model</th><th class="hide-s">State</th><th class="hide-n">Memory</th><th class="hide-n">Context</th><th class="hide-n">Engine</th><th></th></tr></thead><tbody>`;
       for (const m of list) {
@@ -1319,6 +1371,7 @@ $("stats").addEventListener("click", (e) => {
   if (b.dataset.act === "logs") openLogs(selected); else modelAction(selected, b.dataset.act);
 });
 $("stats").addEventListener("toggle", (e) => { if (e.target.id === "statsMore") store.set("aiswap.statsMore", e.target.open); }, true);
+$("fleet").addEventListener("toggle", (e) => { if (e.target.dataset?.hw) store.set("aiswap.hw." + e.target.dataset.hw, e.target.open); }, true);
 $("fleet").addEventListener("click", (e) => {
   const b = e.target.closest("[data-act]");
   if (!b) return;

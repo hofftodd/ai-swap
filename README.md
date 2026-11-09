@@ -202,6 +202,7 @@ node:
   memory_budget_gb: 110      # total for loaded models; 0 = no limit
   port_range: [9100, 9199]   # ports handed to engines that accept a port flag
   resident: [qwen-flash-next] # loaded at startup and kept loaded by default (see below)
+  role: ""                   # optional note shown in the UI, e.g. "ai-factory host"; listed first
 
 peers:                       # other ai-swap machines
   - name: linux
@@ -357,7 +358,7 @@ From a script: `curl -o ~/.pi/agent/models.json http://studio.local:8080/api/cli
 | `POST /v1/messages`, `/v1/messages/count_tokens` | Anthropic-compatible; routed by `model` |
 | `GET /v1/models` | Every runnable model on this machine and online peers. Each entry has extra `node`, `local`, `status` and `engine` fields, and `context_length` when the model sets `ctx` |
 | `GET /api/status` | This machine (version, OS, memory, model states) plus every peer's last known state |
-| `GET /api/node` | This machine only; peers poll this |
+| `GET /api/node` | This machine only; peers poll this. Includes `hardware`: OS and version, kernel, CPU (model, cores, load, temperature, package power where readable), memory and swap, each GPU (VRAM, utilisation, power and limit, temperatures, fan, clock where the driver exposes them), and AC/battery |
 | `GET /api/clients/{client}` | Download an agent config for every model (`pi`, `omp`, `opencode`, `claude`; see [Agent configs](#agent-configs-pi-oh-my-pi-opencode-claude-code)). `?default=<id>` sets opencode's and claude-swap's default model; `?endpoint=http://host:port` overrides the address written into it |
 | `POST /api/models/{name}/load` | Load a model now. `{name}` may be `model@node` |
 | `POST /api/models/{name}/unload` | Unload a model, even if a request is in progress |

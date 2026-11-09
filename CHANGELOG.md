@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Hardware: each machine reports what it runs on in `/api/node` (and so to its
+  peers): OS and version, kernel, the computer's model, CPU (model, cores and
+  threads or P/E cores, clock, utilisation, temperature, package power where
+  readable), memory and swap, load, uptime, each GPU (VRAM, utilisation, power
+  draw and limit, edge and junction temperature, fan, clock: amdgpu on Linux,
+  the chip and GPU cores on Apple Silicon) and AC/battery. Read without root;
+  what needs root (CPU power on recent kernels, power on macOS) says so. The
+  Models view shows it under each machine (collapsible, remembered).
+- `node.role`: a short note shown with the machine (e.g. "ai-factory host");
+  machines with a role are listed first. A machine can run with no models, to
+  show up in the cluster.
+
 - Agent configs: `GET /api/clients/{pi,omp,opencode,claude}` downloads a
   config pointing that coding agent at every model in the cluster through the
   address the request came in on, and the Models view has download links for

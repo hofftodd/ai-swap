@@ -38,6 +38,9 @@ type Node struct {
 	// evicted (least-recently-used first) when another model needs the
 	// memory; they come back once there is room again.
 	Resident []string `yaml:"resident"`
+	// Role is a short note shown with this machine in the UI, e.g. "ai-factory host" for a
+	// machine that runs other parts of the suite. Machines with a role are listed first.
+	Role string `yaml:"role"`
 }
 
 // Peer is another ai-swap node whose models this node can route to.

@@ -22,6 +22,7 @@ import (
 
 	"github.com/hofftodd/ai-swap/internal/cluster"
 	"github.com/hofftodd/ai-swap/internal/config"
+	"github.com/hofftodd/ai-swap/internal/hostinfo"
 	"github.com/hofftodd/ai-swap/internal/scheduler"
 	"github.com/hofftodd/ai-swap/internal/stats"
 	"github.com/hofftodd/ai-swap/internal/version"
@@ -305,9 +306,17 @@ func (s *Server) nodeInfo() cluster.NodeInfo {
 		Name: s.cfg.Node.Name, Version: version.Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
 		MemoryBudgetGB: s.cfg.Node.MemoryBudgetGB,
 		MemoryUsedGB:   s.mgr.UsedGB(),
+		Role:           s.cfg.Node.Role,
 		Models:         s.mgr.Snapshot(),
 		Lock:           s.currentLock(),
+		Hardware:       hardware(),
 	}
+}
+
+// hardware is this machine's description (hostinfo caches it; tests can stub it).
+var hardware = func() *hostinfo.Info {
+	h := hostinfo.Get()
+	return &h
 }
 
 func (s *Server) handleNode(w http.ResponseWriter, _ *http.Request) {

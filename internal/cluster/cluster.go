@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/hofftodd/ai-swap/internal/config"
+	"github.com/hofftodd/ai-swap/internal/hostinfo"
 	"github.com/hofftodd/ai-swap/internal/scheduler"
 )
 
@@ -30,7 +31,10 @@ type NodeInfo struct {
 	Arch           string             `json:"arch"`
 	MemoryBudgetGB float64            `json:"memory_budget_gb"`
 	MemoryUsedGB   float64            `json:"memory_used_gb"`
+	Role           string             `json:"role,omitempty"`
 	Models         []scheduler.Status `json:"models"`
+	// Hardware describes the machine: OS, CPU, memory, GPUs, power, temperatures.
+	Hardware *hostinfo.Info `json:"hardware,omitempty"`
 	// Lock is set while a client (e.g. a benchmark run) has reserved this machine.
 	Lock *LockInfo `json:"lock,omitempty"`
 }
