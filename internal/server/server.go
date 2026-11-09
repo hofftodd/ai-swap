@@ -66,6 +66,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { io.WriteString(w, "ok") })
 	mux.HandleFunc("GET /api/node", s.handleNode)
 	mux.HandleFunc("GET /api/status", s.handleStatus)
+	mux.HandleFunc("GET /api/clients/{client}", s.handleClientConfig)
 	mux.HandleFunc("POST /api/models/{name}/load", s.handleLoad)
 	mux.HandleFunc("POST /api/models/{name}/unload", s.handleUnload)
 	mux.HandleFunc("GET /api/models/{name}/logs", s.handleLogs)
@@ -258,6 +259,12 @@ type modelEntry struct {
 }
 
 func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": s.modelList(r)})
+}
+
+// modelList is every runnable model on this node and, unless r is a hop from
+// a peer, on every online peer. Never nil.
+func (s *Server) modelList(r *http.Request) []modelEntry {
 	var data []modelEntry
 	seen := map[string]bool{}
 	add := func(node string, local bool, st scheduler.Status) {
@@ -290,7 +297,7 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	if data == nil {
 		data = []modelEntry{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+	return data
 }
 
 func (s *Server) nodeInfo() cluster.NodeInfo {

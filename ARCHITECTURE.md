@@ -322,7 +322,7 @@ so a single 20-minute request can't let the reservation lapse under it.
 Taking a reservation pauses the scheduler's reaper (idle unloads, resident
 reloads); releasing it, or its lapsing, resumes them and clears the
 "unloaded by hand" mark on residents, so they come back. The reservation is
-published in `/api/node`, so peers, the UI and Foreman can see it.
+published in `/api/node`, so peers, the UI and ai-factory can see it.
 
 ## Concurrency model
 

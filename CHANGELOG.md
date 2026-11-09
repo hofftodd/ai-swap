@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Agent configs: `GET /api/clients/{pi,omp,opencode,claude}` downloads a
+  config pointing that coding agent at every model in the cluster through the
+  address the request came in on, and the Models view has download links for
+  them. Same entries as ai-tools' `ai-swap-clients`, as standalone files.
+
 - Reservations: `POST /api/lock` hands this machine to one client (e.g. a
   benchmark run) and returns a token. Until it's released (`DELETE
   /api/lock`) or lapses unrenewed (`ttl_seconds`, default 300), only

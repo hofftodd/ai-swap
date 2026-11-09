@@ -330,6 +330,25 @@ earlier messages untouched so the engine's prompt cache still applies. ai-swap d
 engine must support the Anthropic API itself. Sushi, ds4, Strata and recent
 llama.cpp all do.
 
+### Agent configs (pi, oh-my-pi, opencode, Claude Code)
+
+The Models view has download links for a config that points a coding agent at
+every model in the cluster through the address you opened the UI on
+(`http://studio.local:8080` gives files using `http://studio.local:8080/v1`).
+opencode and Claude Code default to the model picked in Chat.
+
+| Link | File | Save as |
+|---|---|---|
+| pi | `models.json` | `~/.pi/agent/models.json` |
+| oh-my-pi | `models.yml` | `~/.omp/agent/models.yml` |
+| opencode | `opencode.json` | `~/.config/opencode/opencode.json` |
+| Claude Code | `claude-swap` | `~/.local/bin/claude-swap`, then `chmod +x`; run `claude-swap --model <id>` |
+
+Each file is complete, so it replaces whatever is there. To merge into
+configs you already have, use `ai-swap-clients` from
+[ai-tools](https://github.com/hofftodd/ai-tools), which writes the same entries.
+From a script: `curl -o ~/.pi/agent/models.json http://studio.local:8080/api/clients/pi`.
+
 ## HTTP API
 
 | Method & path | Description |
@@ -339,6 +358,7 @@ llama.cpp all do.
 | `GET /v1/models` | Every runnable model on this machine and online peers. Each entry has extra `node`, `local`, `status` and `engine` fields, and `context_length` when the model sets `ctx` |
 | `GET /api/status` | This machine (version, OS, memory, model states) plus every peer's last known state |
 | `GET /api/node` | This machine only; peers poll this |
+| `GET /api/clients/{client}` | Download an agent config for every model (`pi`, `omp`, `opencode`, `claude`; see [Agent configs](#agent-configs-pi-oh-my-pi-opencode-claude-code)). `?default=<id>` sets opencode's and claude-swap's default model; `?endpoint=http://host:port` overrides the address written into it |
 | `POST /api/models/{name}/load` | Load a model now. `{name}` may be `model@node` |
 | `POST /api/models/{name}/unload` | Unload a model, even if a request is in progress |
 | `GET /api/models/{name}/logs` | Last 256 KB of the engine's stdout/stderr |

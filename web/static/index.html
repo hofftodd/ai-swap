@@ -233,6 +233,11 @@ details.thinking .think-text { white-space: pre-wrap; border-left: 2px solid var
 #view-models { overflow: auto; padding: 20px 16px 32px; }
 #fleet { max-width: 1040px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
 .fleet-sum { color: var(--muted); font-size: 13px; }
+.clients { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.clients span { margin-right: 4px; }
+a.btn { border: 1px solid var(--border); background: var(--panel); border-radius: 8px; color: inherit; text-decoration: none; display: inline-block; }
+a.btn:hover { border-color: var(--muted); }
+a.btn.small { padding: 2px 9px; font-size: 13px; }
 .ncard { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .ncard.off { opacity: .8; }
 .ncard-head { padding: 12px 16px 12px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
@@ -805,10 +810,25 @@ function render() { renderChats(); renderModelList(); renderTop(); renderMessage
 
 // ---- models table ----------------------------------------------------------
 
+// Download links for coding-agent configs covering every model (GET /api/clients/{client}).
+// The files point at this address; opencode and claude-swap default to the chat's model.
+const CLIENTS = [
+  ["pi", "pi", "~/.pi/agent/models.json"],
+  ["omp", "oh-my-pi", "~/.omp/agent/models.yml"],
+  ["opencode", "opencode", "~/.config/opencode/opencode.json"],
+  ["claude", "Claude Code", "~/.local/bin/claude-swap, then chmod +x it"],
+];
+function clientsBar() {
+  const def = fleet.some(m => m.id === selected) ? `?default=${encodeURIComponent(selected)}` : "";
+  return `<div class="clients" role="group" aria-label="Agent configs"><span>Agent configs for every model:</span>
+    ${CLIENTS.map(([c, label, path]) => `<a class="btn small" href="/api/clients/${c}${def}" download data-k="cl:${c}" title="Save as ${esc(path)}. Replaces the whole file; to merge into an existing one, use ai-swap-clients.">${esc(label)}</a>`).join("")}</div>`;
+}
+
 function renderFleet() {
   if ($("view-models").classList.contains("hidden")) return;
   const up = fleet.filter(isUp).length;
   let html = `<div class="fleet-sum">${nodes.length} machine${nodes.length === 1 ? "" : "s"} · ${fleet.length} models · ${up} loaded. Every model is reachable from any machine; ids ending in <code>@machine</code> pick a copy on a specific one.</div>`;
+  if (fleet.length) html += clientsBar();
   for (const nd of nodes) {
     const list = fleet.filter(x => x.node === nd.name).sort((a, b) => (isUp(b) - isUp(a)) || a.name.localeCompare(b.name));
     const facts = [nd.local ? "this machine" : "peer", nd.os && `${nd.os}/${nd.arch}`, nd.version && "v" + nd.version,
