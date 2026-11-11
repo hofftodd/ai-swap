@@ -47,8 +47,8 @@ type CPU struct {
 	PCores  int      `json:"performance_cores,omitempty"` // Apple Silicon
 	ECores  int      `json:"efficiency_cores,omitempty"`
 	MaxMHz  int      `json:"max_mhz,omitempty"`
-	TempC   *float64 `json:"temp_c,omitempty"`
-	Watts   *float64 `json:"watts,omitempty"` // package power (Linux RAPL, when readable)
+	TempC   *float64 `json:"temp_c,omitempty"` // Apple Silicon: the hottest die sensor (SoC)
+	Watts   *float64 `json:"watts,omitempty"`  // package power (Linux RAPL, when readable)
 	BusyPct *float64 `json:"busy_percent,omitempty"`
 }
 
@@ -505,6 +505,7 @@ func darwinLive(info *Info) {
 			info.SwapTotal, info.SwapUsed = int64(t*(1<<20)), int64(u*(1<<20))
 		}
 	}
+	info.CPU.TempC = socTemp()
 	info.Power = Power{Note: "power draw on macOS needs root (powermetrics)"}
 	if out := run("pmset", "-g", "batt"); out != "" {
 		if strings.Contains(out, "'AC Power'") {

@@ -653,7 +653,7 @@ function hwRows(hw) {
   row("CPU", c.name,
     c.cores && (c.performance_cores ? `${c.cores} cores (${c.performance_cores}P + ${c.efficiency_cores}E)` : `${c.cores} cores / ${c.threads} threads`),
     c.max_mhz && `${(c.max_mhz / 1000).toFixed(1)} GHz`, c.busy_percent != null && `${c.busy_percent.toFixed(0)}% busy`,
-    num(c.temp_c, "°C"), num(c.watts, "W", 1));
+    c.temp_c != null && (hw.unified_memory ? `SoC ${num(c.temp_c, "°C")}` : num(c.temp_c, "°C")), num(c.watts, "W", 1));
   if (hw.load?.length) row("Load", hw.load.map(v => v.toFixed(2)).join(" / ") + " (1/5/15 min)");
   const used = hw.mem_total_bytes - (hw.mem_available_bytes || 0);
   row(hw.unified_memory ? "Memory (unified)" : "Memory", hw.mem_total_bytes && `${bytes(used)} used of ${bytes(hw.mem_total_bytes)}`,
