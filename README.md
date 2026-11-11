@@ -1,4 +1,4 @@
-# ai-swap
+# <img src="web/static/favicon.svg" width="40" alt="" align="top"> ai-swap
 
 **One endpoint and one chat UI for all the local models on all your machines.**
 
