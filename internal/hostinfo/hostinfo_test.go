@@ -22,3 +22,13 @@ func TestGetDescribesThisMachine(t *testing.T) {
 	b, _ := json.MarshalIndent(Get(), "", "  ")
 	t.Logf("%s", b)
 }
+
+func TestSoCTempIsPlausibleWhenReported(t *testing.T) {
+	// Only macOS with cgo reports one; elsewhere it's nil.
+	if v := socTemp(); v != nil {
+		t.Logf("SoC %.1f °C", *v)
+	}
+	if v := socTemp(); v != nil && (*v <= 0 || *v >= 150) {
+		t.Fatalf("SoC temperature %v °C is out of range", *v)
+	}
+}
