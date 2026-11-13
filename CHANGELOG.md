@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Placement: a model defined on several machines is served where it needs no
+  swap. A machine with it loaded wins (the least busy one), then one where it
+  fits in free memory, then this machine as before. Machines reserved by
+  someone else are skipped while another copy exists; the reservation's holder
+  is always served on the machine it reserved. Pinned names (`model@node`) and
+  the load/unload/logs/stats endpoints are unchanged.
+
 - Hardware: each machine reports what it runs on in `/api/node` (and so to its
   peers): OS and version, kernel, the computer's model, CPU (model, cores and
   threads or P/E cores, clock, utilisation, temperature, package power where

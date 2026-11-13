@@ -185,11 +185,17 @@ Set `listen: 0.0.0.0:8686` so peers can reach each other, and read
 [Security](#security) first.
 
 **Where requests go:**
-- If this machine has the model (or an alias of it) and can run its engine
-  on this OS, the request is served here.
-- Otherwise it is forwarded to an online peer that has the model, preferring
-  one where the model is already loaded.
-- `name@node` forces a particular machine.
+- If only one machine has the model (or an alias of it) and can run its
+  engine, the request goes there.
+- If several do, it goes where it needs no swap: a machine where the model
+  is already loaded (the least busy one, then this machine); else one where
+  it fits in free memory without unloading anything (this machine first);
+  else this machine, which unloads idle models to make room.
+- A machine reserved by someone else (see [Reservations](#reservations)) is
+  skipped while another copy exists. A request carrying this machine's
+  reservation token is always served here.
+- `name@node` forces a particular machine. Loading, unloading, logs and stats
+  for an unpinned name mean this machine's copy.
 - Forwarded requests carry an `X-AI-Swap-Hop` header and are never forwarded
   again, so peers can't bounce a request back and forth.
 
@@ -447,8 +453,8 @@ is the first item on the roadmap.
 - A non-interactive server command for Strata is not confirmed yet, so two
   Strata models are swapped rather than run side by side.
 - `memory_gb` is what you configure, not measured usage.
-- If a model is defined on two machines, the local one is preferred, rather
-  than whichever has free memory.
+- Placement reads peers' state as of their last poll (at most 10 s old), so
+  two requests in quick succession can both pick a peer that looked free.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md#roadmap) for the full roadmap and
 [CHANGELOG.md](CHANGELOG.md) for release notes.

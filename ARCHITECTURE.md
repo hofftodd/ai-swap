@@ -281,10 +281,20 @@ express (for example, finding models on disk), implement `Engine` directly.
   this.) The 3 s limit matters with mDNS names: if a hostname also resolves
   to an IPv6 address that a firewall silently drops, every new connection
   would otherwise wait 20-75 s.
-- **Choosing a peer** (`cluster.Find`): online peers that have the name (or
-  alias) and can run it, preferring one where it is already `ready`.
-  `model@node` matches either the peer's configured name or the name it
-  reports for itself.
+- **Placement** (`server/placement.go`): when a name (or alias) is served by
+  this machine and by peers, or by several peers, `place` picks the copy that
+  needs no swap: first one that is loaded or loading (fewest requests in
+  flight, then this machine); then one that fits in its machine's free memory
+  (budget minus loaded models), this machine first; otherwise this machine, as
+  before. A machine reserved by someone else is picked only if every copy is
+  reserved, so the caller gets the reservation's 503. A request carrying this
+  machine's reservation token is always served here. Peer state is as of the
+  last poll (at most 10 s old, refreshed after each forward), so two requests
+  in quick succession can both see a cold peer as free.
+- **Pinning and management:** `model@node` matches either the peer's
+  configured name or the name it reports for itself, and skips placement. The
+  load, unload, logs and stats endpoints don't use placement either: an
+  unpinned name there means this machine's copy (`Server.locate`).
 - **Loop prevention:** forwarded requests (including the polls) carry
   `X-AI-Swap-Hop: 1`. A machine that sees it only serves its own models and
   only lists its own models in `/v1/models`.
@@ -397,8 +407,9 @@ Roughly in priority order:
    (Bearer or `x-api-key`) and sent to peers.
 3. **Fair swapping.** Add the "draining" flag described under
    [Scheduling](#scheduling-and-eviction).
-4. **Smarter placement.** When a model exists on several machines, prefer
-   one where it is loaded, or which has free memory, over local-first.
+4. ~~**Smarter placement.**~~ Done: a model on several machines is served
+   where it is loaded, or fits in free memory, before local-first (see
+   Placement above).
 5. **Measured memory.** Read actual use with `vm_stat` (macOS) and
    `amd-smi`/`rocm-smi`/`nvidia-smi` (Linux), and compare it with
    `memory_gb`.

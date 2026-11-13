@@ -266,6 +266,41 @@ func (c *Cluster) Find(name string) (target *url.URL, model string, ok bool) {
 	return best.parsed, bestModel, true
 }
 
+// Copy is one online peer's copy of a model, with what placement needs to know.
+type Copy struct {
+	Node   string
+	URL    *url.URL
+	Model  scheduler.Status
+	FreeGB float64   // the peer's memory budget minus what its loaded models use
+	Lock   *LockInfo // the peer's reservation, if any
+}
+
+// Copies lists every online peer that can run the model (a name or an alias),
+// as last polled.
+func (c *Cluster) Copies(name string) []Copy {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var out []Copy
+	for _, p := range c.peers {
+		if !p.Online || p.Node == nil {
+			continue
+		}
+		for _, m := range p.Node.Models {
+			if m.Runnable && (m.Name == name || contains(m.Aliases, name)) {
+				out = append(out, Copy{
+					Node:   p.Name,
+					URL:    p.parsed,
+					Model:  m,
+					FreeGB: p.Node.MemoryBudgetGB - p.Node.MemoryUsedGB,
+					Lock:   p.Node.Lock,
+				})
+				break
+			}
+		}
+	}
+	return out
+}
+
 func contains(s []string, v string) bool {
 	for _, x := range s {
 		if x == v {

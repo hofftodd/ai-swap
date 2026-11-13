@@ -94,9 +94,11 @@ type route struct {
 	remote string   // model name on the peer
 }
 
-// resolve finds the model for a client-supplied name ("model", alias, or
-// "model@node").
-func (s *Server) resolve(name string, allowPeers bool) (route, bool) {
+// locate finds a model for the management endpoints (load, unload, logs,
+// stats): this machine's copy if it has one, else a peer's ("model@node" pins
+// the machine). Unlike resolve it never moves to another machine's copy,
+// since an unpinned name there means the copy here.
+func (s *Server) locate(name string, allowPeers bool) (route, bool) {
 	want, node, pinned := strings.Cut(name, "@")
 	if !pinned || node == s.cfg.Node.Name {
 		if m, ok := s.cfg.Resolve(want); ok {
@@ -111,6 +113,35 @@ func (s *Server) resolve(name string, allowPeers bool) (route, bool) {
 		}
 	}
 	return route{}, false
+}
+
+// resolve finds the model for a client-supplied name ("model", alias, or
+// "model@node"). A pinned name goes to that machine. Otherwise, when several
+// machines have the model, place picks the one that can serve it without a
+// swap (see placement.go); a request carrying this machine's reservation
+// token is always served here, where its holder reserved.
+func (s *Server) resolve(r *http.Request, name string, allowPeers bool) (route, bool) {
+	want, _, pinned := strings.Cut(name, "@")
+	if pinned {
+		return s.locate(name, allowPeers)
+	}
+	cands := s.candidates(r, want, allowPeers)
+	if s.holdsLock(r) {
+		for _, c := range cands {
+			if c.local {
+				return route{local: c.model}, true
+			}
+		}
+	}
+	c, ok := place(cands)
+	switch {
+	case !ok:
+		return route{}, false
+	case c.local:
+		return route{local: c.model}, true
+	default:
+		return route{peer: c.peer, remote: c.model}, true
+	}
 }
 
 func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
@@ -132,7 +163,7 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rt, ok := s.resolve(head.Model, r.Header.Get(cluster.HopHeader) == "")
+	rt, ok := s.resolve(r, head.Model, r.Header.Get(cluster.HopHeader) == "")
 	if !ok {
 		s.notFound(w, r, head.Model)
 		return
@@ -340,7 +371,7 @@ func (s *Server) handleUnload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) manage(w http.ResponseWriter, r *http.Request, action string) {
-	rt, ok := s.resolve(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
+	rt, ok := s.locate(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown model"})
 		return
@@ -371,7 +402,7 @@ func (s *Server) manage(w http.ResponseWriter, r *http.Request, action string) {
 }
 
 func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	rt, ok := s.resolve(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
+	rt, ok := s.locate(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
 	if !ok {
 		http.Error(w, "unknown model", http.StatusNotFound)
 		return
@@ -518,7 +549,7 @@ type modelConfig struct {
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	rt, ok := s.resolve(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
+	rt, ok := s.locate(r.PathValue("name"), r.Header.Get(cluster.HopHeader) == "")
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown model"})
 		return
