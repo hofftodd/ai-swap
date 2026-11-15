@@ -424,16 +424,40 @@ dialog#logs::backdrop { background: rgb(0 0 0 / .35); }
     h.set("Authorization", "Bearer " + key);
     return { ...init, headers: h };
   };
+  // A small in-page form (not prompt(), which embedded browsers may block).
+  // Every request that gets a 401 waits on the same form.
   let asking = null;
+  const askKey = (wrong) => asking ??= new Promise(resolve => {
+    const d = document.createElement("div");
+    d.setAttribute("role", "dialog");
+    d.setAttribute("aria-label", "API key");
+    d.style.cssText = "position:fixed;inset:0;z-index:1000;display:grid;place-items:center;background:rgba(0,0,0,.5)";
+    d.innerHTML = `<form style="background:var(--panel,#fff);color:var(--text,#000);border:1px solid var(--border,#ccc);border-radius:12px;padding:20px;width:min(360px,calc(100vw - 32px));display:grid;gap:10px">
+      <b>This ai-swap needs its API key</b>
+      <span style="color:var(--muted,#666);font-size:13px">${wrong ? "That key was refused. " : ""}It's kept in this browser only.</span>
+      <input type="password" autocomplete="off" aria-label="API key" style="padding:8px;border-radius:8px;border:1px solid var(--border,#ccc);background:transparent;color:inherit">
+      <button type="submit" style="padding:8px;border-radius:8px">Save</button></form>`;
+    const input = d.querySelector("input");
+    d.querySelector("form").onsubmit = (e) => {
+      e.preventDefault();
+      const key = input.value.trim();
+      if (!key) return;
+      try { localStorage.setItem(KEY, key); } catch {}
+      d.remove();
+      asking = null;
+      resolve(key);
+    };
+    document.body.appendChild(d);
+    input.focus();
+  });
   window.fetch = async (input, init) => {
-    let r = await raw(input, withKey(init, getKey()));
-    if (r.status !== 401) return r;
-    asking ??= Promise.resolve(prompt("This ai-swap needs its API key:"));
-    const key = ((await asking) || "").trim();
-    asking = null;
-    if (!key) return r;
-    try { localStorage.setItem(KEY, key); } catch {}
-    return raw(input, withKey(init, key));
+    let key = getKey();
+    let r = await raw(input, withKey(init, key));
+    while (r.status === 401) {
+      key = await askKey(!!key);
+      r = await raw(input, withKey(init, key));
+    }
+    return r;
   };
 }
 const $ = (id) => document.getElementById(id);

@@ -589,7 +589,7 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	if out.Config.Model == "" && m.Cmd != "" {
 		out.Config.Model = m.Cmd
 	}
-	out.Config.KVCache = kvCache(m.Args)
+	out.Config.KVCache = kvCache(append(append([]string(nil), s.cfg.Engines[m.Engine].Args...), m.Args...))
 	out.File = fileInfo(m)
 	for _, st := range s.mgr.Snapshot() {
 		if st.Name == rt.local {
