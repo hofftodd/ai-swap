@@ -50,6 +50,7 @@ type Server struct {
 	ui        fs.FS
 	stats     *stats.Recorder
 	lock      reservation // see lock.go
+	leases    leases      // see lease.go
 }
 
 // New builds the server. ui may be nil.
@@ -76,6 +77,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/lock", s.handleLockStatus)
 	mux.HandleFunc("POST /api/lock", s.handleLock)
 	mux.HandleFunc("DELETE /api/lock", s.handleUnlock)
+	mux.HandleFunc("GET /api/leases", s.handleLeaseStatus)
+	mux.HandleFunc("POST /api/leases", s.handleLease)
+	mux.HandleFunc("DELETE /api/leases/{id}", s.handleLeaseRelease)
 	// llama-swap compatibility (llamaswap.go).
 	mux.HandleFunc("GET /running", s.handleRunning)
 	mux.HandleFunc("GET /unload", s.handleUnloadAll)
@@ -84,7 +88,7 @@ func (s *Server) Handler() http.Handler {
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}
-	return s.logRequests(mux)
+	return s.requireKey(s.logRequests(mux))
 }
 
 // route describes where a request for a model should go.
@@ -242,6 +246,10 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte, targ
 			pr.Out.Header.Set("Content-Length", strconv.Itoa(len(body)))
 			if hop {
 				pr.Out.Header.Set(cluster.HopHeader, "1")
+				if k := s.cluster.APIKey(); k != "" {
+					pr.Out.Header.Set("Authorization", "Bearer "+k)
+					pr.Out.Header.Del("x-api-key")
+				}
 			}
 		},
 		Transport:     s.transport,
@@ -340,6 +348,7 @@ func (s *Server) nodeInfo() cluster.NodeInfo {
 		Role:           s.cfg.Node.Role,
 		Models:         s.mgr.Snapshot(),
 		Lock:           s.currentLock(),
+		Leases:         s.leaseList(),
 		Hardware:       hardware(),
 	}
 }

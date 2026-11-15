@@ -41,6 +41,11 @@ type Node struct {
 	// Role is a short note shown with this machine in the UI, e.g. "ai-factory host" for a
 	// machine that runs other parts of the suite. Machines with a role are listed first.
 	Role string `yaml:"role"`
+	// APIKey, when set, is required on every API request (as "Authorization:
+	// Bearer <key>" or "x-api-key: <key>"); the UI and /health stay open. The
+	// cluster shares one key: it is also sent to peers. AI_SWAP_API_KEY in
+	// the environment overrides it, so the key can stay out of the config file.
+	APIKey string `yaml:"api_key"`
 }
 
 // Peer is another ai-swap node whose models this node can route to.

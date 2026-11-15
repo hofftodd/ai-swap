@@ -412,6 +412,30 @@ dialog#logs::backdrop { background: rgb(0 0 0 / .35); }
 
 <script>
 "use strict";
+// When ai-swap has an API key, every API call carries it. The key is asked for
+// once (on the first 401) and kept in this browser's localStorage.
+{
+  const raw = window.fetch.bind(window);
+  const KEY = "ai-swap:api-key";
+  const getKey = () => { try { return localStorage.getItem(KEY) || ""; } catch { return ""; } };
+  const withKey = (init, key) => {
+    if (!key) return init;
+    const h = new Headers(init?.headers || {});
+    h.set("Authorization", "Bearer " + key);
+    return { ...init, headers: h };
+  };
+  let asking = null;
+  window.fetch = async (input, init) => {
+    let r = await raw(input, withKey(init, getKey()));
+    if (r.status !== 401) return r;
+    asking ??= Promise.resolve(prompt("This ai-swap needs its API key:"));
+    const key = ((await asking) || "").trim();
+    asking = null;
+    if (!key) return r;
+    try { localStorage.setItem(KEY, key); } catch {}
+    return raw(input, withKey(init, key));
+  };
+}
 const $ = (id) => document.getElementById(id);
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },

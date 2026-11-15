@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -81,6 +82,9 @@ func (s *Server) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	if s.cfg.Node.APIKey != "" {
+		body = keyFromEnv(body, r.PathValue("client"))
 	}
 	w.Header().Set("Content-Type", cf.contentType+"; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+cf.name+`"`)
@@ -212,4 +216,17 @@ export ANTHROPIC_SMALL_FAST_MODEL="${AI_SWAP_SMALL_MODEL:-$ANTHROPIC_MODEL}"
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 exec claude "$@"
 `, endpoint, def)), nil
+}
+
+// keyFromEnv points a client config at $AI_SWAP_API_KEY instead of the dummy
+// key, in each client's own syntax, so the key itself never lands in a file.
+func keyFromEnv(body []byte, client string) []byte {
+	ref := map[string]string{
+		"pi": "$AI_SWAP_API_KEY", "omp": "$AI_SWAP_API_KEY",
+		"opencode": "{env:AI_SWAP_API_KEY}", "claude": "${AI_SWAP_API_KEY:-no-key-required}",
+	}[client]
+	if ref == "" {
+		return body
+	}
+	return bytes.ReplaceAll(body, []byte("no-key-required"), []byte(ref))
 }

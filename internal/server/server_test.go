@@ -74,6 +74,12 @@ type node struct {
 
 func newNode(t *testing.T, yaml string, peers ...string) *node {
 	t.Helper()
+	return newNodeWithKey(t, yaml, "", peers...)
+}
+
+// newNodeWithKey is newNode for a cluster sharing an API key (sent to peers).
+func newNodeWithKey(t *testing.T, yaml, key string, peers ...string) *node {
+	t.Helper()
 	cfg, err := config.Parse([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +97,7 @@ func newNode(t *testing.T, yaml string, peers ...string) *node {
 	if err != nil {
 		t.Fatal(err)
 	}
+	cl.SetAPIKey(key)
 	ctx, cancel := context.WithCancel(context.Background())
 	go cl.Run(ctx, time.Hour)
 	ts := httptest.NewServer(New(cfg, mgr, cl, nil, log).Handler())

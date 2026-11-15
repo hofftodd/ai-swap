@@ -37,6 +37,8 @@ type NodeInfo struct {
 	Hardware *hostinfo.Info `json:"hardware,omitempty"`
 	// Lock is set while a client (e.g. a benchmark run) has reserved this machine.
 	Lock *LockInfo `json:"lock,omitempty"`
+	// Leases are clients keeping a model loaded across many requests.
+	Leases []LeaseInfo `json:"leases,omitempty"`
 }
 
 // LockInfo describes a reservation of a machine (the token is never shown).
@@ -44,6 +46,15 @@ type LockInfo struct {
 	Owner   string    `json:"owner"`
 	Reason  string    `json:"reason,omitempty"`
 	Models  []string  `json:"models,omitempty"`
+	Since   time.Time `json:"since"`
+	Expires time.Time `json:"expires"`
+}
+
+// LeaseInfo describes a lease on a model (the lease id is never shown).
+type LeaseInfo struct {
+	Model   string    `json:"model"`
+	Owner   string    `json:"owner"`
+	Reason  string    `json:"reason,omitempty"`
 	Since   time.Time `json:"since"`
 	Expires time.Time `json:"expires"`
 }
@@ -64,6 +75,7 @@ type PeerState struct {
 type Cluster struct {
 	log    *slog.Logger
 	client *http.Client
+	apiKey string // sent to peers; see SetAPIKey
 
 	mu    sync.RWMutex
 	peers []*PeerState
@@ -81,6 +93,12 @@ func New(peers []config.Peer, log *slog.Logger) (*Cluster, error) {
 	}
 	return c, nil
 }
+
+// SetAPIKey sets the key sent with every poll (the cluster shares one key).
+func (c *Cluster) SetAPIKey(key string) { c.apiKey = key }
+
+// APIKey is the key sent to peers ("" when the cluster has none).
+func (c *Cluster) APIKey() string { return c.apiKey }
 
 // Run polls every peer until ctx is done.
 func (c *Cluster) Run(ctx context.Context, every time.Duration) {
@@ -129,6 +147,9 @@ func (c *Cluster) fetch(ctx context.Context, p *PeerState) (*NodeInfo, error) {
 		return nil, err
 	}
 	req.Header.Set(HopHeader, "1")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
