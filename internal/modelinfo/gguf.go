@@ -102,6 +102,10 @@ func (g *ggufReader) value(t uint32) any {
 		return g.str()
 	case ggufArray:
 		et, n := g.u32(), g.u64()
+		if et == ggufArray || n > 1<<26 { // vocabularies are ~10^5-10^6 entries
+			g.err = fmt.Errorf("unsupported GGUF array (type %d, %d entries)", et, n)
+			return nil
+		}
 		for i := uint64(0); i < n && g.err == nil; i++ {
 			g.value(et)
 		}
@@ -138,9 +142,13 @@ type tensor struct {
 	typ  uint32
 }
 
+// elems is the tensor's element count, or 0 for an implausible shape.
 func (t tensor) elems() int64 {
 	n := int64(1)
 	for _, d := range t.dims {
+		if d == 0 || d > 1<<40 || n > (1<<62)/int64(d) {
+			return 0
+		}
 		n *= int64(d)
 	}
 	return n

@@ -188,7 +188,8 @@ func (c *Cluster) learnLocked(from *PeerState, refs []PeerRef) []*PeerState {
 			continue
 		}
 		u, err := url.Parse(strings.TrimRight(r.URL, "/"))
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (loopback(u) && !loopback(from.parsed)) {
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+			(loopback(u) && !loopback(from.parsed)) || linkLocal(u) {
 			continue
 		}
 		p := &PeerState{Name: r.Name, URL: u.String(), parsed: u, Learned: true}
@@ -227,6 +228,13 @@ func loopback(u *url.URL) bool {
 	}
 	ip := net.ParseIP(h)
 	return ip != nil && ip.IsLoopback()
+}
+
+// linkLocal reports a link-local address (such as a cloud metadata service),
+// which is never a peer: the cluster key is sent to every peer it polls.
+func linkLocal(u *url.URL) bool {
+	ip := net.ParseIP(u.Hostname())
+	return ip != nil && (ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified())
 }
 
 // Refs lists the peers to publish to other nodes: online ones, by node name.

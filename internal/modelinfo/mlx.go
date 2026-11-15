@@ -67,9 +67,13 @@ func safetensorsHeader(path string) (map[string]stTensor, error) {
 	return out, nil
 }
 
+// prod is a shape's element count, or 0 for an implausible shape.
 func prod(s []int64) int64 {
 	n := int64(1)
 	for _, d := range s {
+		if d <= 0 || d > 1<<40 || n > (1<<58)/d {
+			return 0
+		}
 		n *= d
 	}
 	return n
@@ -79,7 +83,7 @@ func prod(s []int64) int64 {
 // override in the quantization map, else the default.
 func quantBits(q map[string]any, layer string, def int) int {
 	if o, ok := q[layer].(map[string]any); ok {
-		if b, ok := o["bits"].(float64); ok {
+		if b, ok := o["bits"].(float64); ok && b >= 1 && b <= 16 {
 			return int(b)
 		}
 	}
@@ -106,7 +110,7 @@ func readMLX(dir string) (*Info, error) {
 	info.Experts, info.ExpertsUsed = max(text.experts(), cfg.experts()), text.ExpertsUsed
 
 	def := 0
-	if v, ok := cfg.Quant["bits"].(float64); ok {
+	if v, ok := cfg.Quant["bits"].(float64); ok && v >= 1 && v <= 16 {
 		def = int(v)
 	}
 	files, _ := filepath.Glob(filepath.Join(dir, "*.safetensors"))
