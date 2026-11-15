@@ -181,3 +181,41 @@ models:
 		t.Fatalf("kv cache: %v", out["config"])
 	}
 }
+
+const midCfg = `
+node: {name: mid, port_range: [19500, 19549]}
+models:
+  helper:
+    engine: generic
+    cmd: "helper-backend --port ${PORT}"
+`
+
+// A node configured with one peer learns that peer's peers and routes to them
+// directly.
+func TestPeersLearnedTransitively(t *testing.T) {
+	linux := newNode(t, linuxCfg)
+	mid := newNode(t, midCfg, linux.url)
+	mac := newNode(t, macCfg, mid.url)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		code, out := post(t, mac.url+"/v1/chat/completions", `{"model":"coder","messages":[]}`)
+		if code == 200 && out["backend"] == "coder-backend" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("mac never reached linux's model: %d %v", code, out)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_, st := send(t, "GET", mac.url+"/api/status", "")
+	b, _ := json.Marshal(st["peers"])
+	if !strings.Contains(string(b), `"learned":true`) || !strings.Contains(string(b), `"name":"linux"`) {
+		t.Fatalf("mac should list linux as learned: %s", b)
+	}
+	// mac publishes its own peers but never itself.
+	_, node := send(t, "GET", mac.url+"/api/node", "")
+	if b, _ := json.Marshal(node["peers"]); strings.Contains(string(b), `"name":"mac"`) {
+		t.Fatalf("mac lists itself: %s", b)
+	}
+}

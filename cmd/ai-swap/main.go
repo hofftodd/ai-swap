@@ -66,6 +66,7 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 		return err
 	}
 	cl.SetAPIKey(cfg.Node.APIKey)
+	cl.SetSelf(cfg.Node.Name)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

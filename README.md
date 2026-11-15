@@ -35,6 +35,8 @@ one pool.
 - [Configuration reference](#configuration-reference)
 - [Using it](#using-it)
 - [HTTP API](#http-api)
+- [Reservations](#reservations)
+- [Leases](#leases)
 - [Running as a service](#running-as-a-service)
 - [Troubleshooting](#troubleshooting)
 - [Security](#security)
@@ -209,8 +211,9 @@ node:
   port_range: [9100, 9199]   # ports handed to engines that accept a port flag
   resident: [qwen-flash-next] # loaded at startup and kept loaded by default (see below)
   role: ""                   # optional note shown in the UI, e.g. "ai-factory host"; listed first
+  api_key: ""                # require this key on the API; or set AI_SWAP_API_KEY (see Security)
 
-peers:                       # other ai-swap machines
+peers:                       # other ai-swap machines (one is enough: peers' peers are learned)
   - name: linux
     url: http://linux.local:8686
 
@@ -242,6 +245,9 @@ models:
     port: 8000               # force a fixed port
     upstream_model: ""       # rewrite "model" before sending to the engine
     cmd: ""                  # replace the whole command; see below
+    params: ""               # e.g. "35B": shown in the UI when the files don't say
+    active_params: ""        # e.g. "3B": per token, for mixture-of-experts models
+    quant: ""                # e.g. "Q4_K experts, Q8 attention": overrides what the files say
 ```
 
 **`resident`** names the models a node keeps loaded by default, such as
@@ -369,10 +375,11 @@ From a script: `curl -o ~/.pi/agent/models.json http://studio.local:8080/api/cli
 | `POST /api/models/{name}/load` | Load a model now. `{name}` may be `model@node` |
 | `POST /api/models/{name}/unload` | Unload a model, even if a request is in progress |
 | `GET /api/models/{name}/logs` | Last 256 KB of the engine's stdout/stderr |
-| `GET /api/models/{name}/stats` | Live stats for the UI's stats pane: state, load time, process memory, GPU memory (Linux/AMD), what the engine reports about the model (parameters, quantization, context, slots, metrics), and request stats measured by ai-swap (tok/s, time to first token, tokens, draft acceptance) |
+| `GET /api/models/{name}/stats` | Live stats for the UI's stats pane: state, load time, process memory, GPU memory (Linux/AMD), what the model's files say it is (`file`: total and active parameters, quantization, bits per weight, weight size, architecture, trained context; known whether loaded or not), what the engine reports (context, slots, metrics), and request stats measured by ai-swap (tok/s, time to first token, tokens, draft acceptance) |
 | `GET /health` | Returns `ok` |
 | `POST /api/unload` | Unload every model on this machine (residents stay unloaded until used) |
 | `GET`/`POST`/`DELETE /api/lock` | Reserve this machine for one client, e.g. a benchmark run (see [Reservations](#reservations)) |
+| `GET`/`POST /api/leases`, `DELETE /api/leases/{id}` | Keep a model loaded across many requests, e.g. an agent step (see [Leases](#leases)) |
 | `GET /running`, `GET\|POST /unload`, `GET /upstream/{model}/{path...}` | llama-swap compatibility for this machine's models: loaded models, unload all, and a GET passed straight to a model's engine (e.g. llama.cpp's `/props`) |
 
 Errors use the OpenAI shape (`{"error":{...}}`), except on `/v1/messages*`,
@@ -441,12 +448,43 @@ header has the install, restart and remove commands. Logs go to
 | `503` "model … is on node X, which is offline" | The model's machine stopped answering. Clients should retry after `Retry-After`; the peer is polled every 10 s |
 | Streaming arrives in one chunk behind nginx | Set `proxy_buffering off;` for `/v1/` |
 
+## Leases
+
+ai-swap protects a model only while a request is in flight. An agent step
+uses its model for minutes, with pauses between requests while its tools
+run, so another client's load can evict the model mid-step. A lease closes
+that gap:
+
+```bash
+curl -X POST http://studio.local:8080/api/leases \
+  -d '{"model":"flint","owner":"ai-factory","reason":"builder step","ttl_seconds":600}'
+# → {"lease_id":"…","lease":{…},"node":"studio"}
+```
+
+Taking a lease loads the model if needed. While it lasts the model counts as
+busy: a load that needs its memory waits instead of evicting it, and the idle
+reaper leaves it alone. Renew by POSTing `{"lease_id":"…"}` (with `model` too
+when the lease is on another machine); release with
+`DELETE /api/leases/{id}` (add `?model=<name>` for another machine's model).
+Unrenewed leases lapse after `ttl_seconds` (default 10 minutes, at most an
+hour). `model@node`, or a model only a peer has, is leased on that peer. An
+explicit unload (UI, `/api/unload`) still wins. Leases are listed in
+`/api/node` and `GET /api/leases`, without their ids.
+
 ## Security
 
-v0.1 has **no authentication**. Anyone who can reach the port can use your
-models and load or unload them. Keep `listen` on `127.0.0.1`, or only expose
-it on a trusted LAN or a private network such as Tailscale. A shared API key
-is the first item on the roadmap.
+With no `api_key`, ai-swap has **no authentication**: anyone who can reach the
+port can use your models and load or unload them. Keep `listen` on
+`127.0.0.1`, or expose it only on a trusted LAN or a private network such as
+Tailscale.
+
+Set `node.api_key` (or `AI_SWAP_API_KEY` in the service's environment, to
+keep it out of the config file) to require a key on every API route:
+`Authorization: Bearer <key>` or `x-api-key: <key>`. The UI's page and
+`/health` stay open; the UI asks for the key once and keeps it in the
+browser. The machines of a cluster share one key and send it to each other.
+Agent configs from `/api/clients/{client}` then read the key from
+`$AI_SWAP_API_KEY` instead of containing it.
 
 ## Known gaps
 

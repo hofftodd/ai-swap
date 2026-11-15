@@ -39,6 +39,15 @@ type NodeInfo struct {
 	Lock *LockInfo `json:"lock,omitempty"`
 	// Leases are clients keeping a model loaded across many requests.
 	Leases []LeaseInfo `json:"leases,omitempty"`
+	// Peers are the other machines this node knows, so a node that lists only
+	// one of them learns the rest.
+	Peers []PeerRef `json:"peers,omitempty"`
+}
+
+// PeerRef names another node and where to reach it.
+type PeerRef struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 // LockInfo describes a reservation of a machine (the token is never shown).
@@ -67,15 +76,23 @@ type PeerState struct {
 	Error    string    `json:"error,omitempty"`
 	LastSeen time.Time `json:"last_seen,omitempty"`
 	Node     *NodeInfo `json:"node,omitempty"`
+	// Learned is set for a peer found through another peer rather than
+	// configured; it is dropped after learnedFails failed polls in a row.
+	Learned bool `json:"learned,omitempty"`
 
 	parsed *url.URL
+	fails  int
 }
+
+// learnedFails is how many failed polls in a row drop a learned peer.
+const learnedFails = 3
 
 // Cluster polls peers and answers "who serves model X?".
 type Cluster struct {
 	log    *slog.Logger
 	client *http.Client
 	apiKey string // sent to peers; see SetAPIKey
+	self   string // this node's name, never added as a peer
 
 	mu    sync.RWMutex
 	peers []*PeerState
@@ -93,6 +110,9 @@ func New(peers []config.Peer, log *slog.Logger) (*Cluster, error) {
 	}
 	return c, nil
 }
+
+// SetSelf names this node, so a peer's list that includes it is ignored.
+func (c *Cluster) SetSelf(name string) { c.self = name }
 
 // SetAPIKey sets the key sent with every poll (the cluster shares one key).
 func (c *Cluster) SetAPIKey(key string) { c.apiKey = key }
@@ -115,9 +135,16 @@ func (c *Cluster) Run(ctx context.Context, every time.Duration) {
 	}
 }
 
+// snapshot returns the current peer list (it grows as peers are learned).
+func (c *Cluster) snapshot() []*PeerState {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return append([]*PeerState(nil), c.peers...)
+}
+
 func (c *Cluster) pollAll(ctx context.Context) {
 	var wg sync.WaitGroup
-	for _, p := range c.peers {
+	for _, p := range c.snapshot() {
 		wg.Add(1)
 		go func() { defer wg.Done(); c.poll(ctx, p) }()
 	}
@@ -127,18 +154,93 @@ func (c *Cluster) pollAll(ctx context.Context) {
 func (c *Cluster) poll(ctx context.Context, p *PeerState) {
 	info, err := c.fetch(ctx, p)
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if err != nil {
 		if p.Online {
 			c.log.Warn("peer offline", "peer", p.Name, "err", err)
 		}
 		p.Online, p.Error = false, err.Error()
+		p.fails++
+		if p.Learned && p.fails >= learnedFails {
+			c.dropLocked(p)
+		}
+		c.mu.Unlock()
 		return
 	}
 	if !p.Online {
 		c.log.Info("peer online", "peer", p.Name, "node", info.Name, "models", len(info.Models))
 	}
-	p.Online, p.Error, p.LastSeen, p.Node = true, "", time.Now(), info
+	p.Online, p.Error, p.LastSeen, p.Node, p.fails = true, "", time.Now(), info, 0
+	added := c.learnLocked(p, info.Peers)
+	c.mu.Unlock()
+	for _, n := range added {
+		go c.poll(ctx, n)
+	}
+}
+
+// learnLocked adds the peers that peer from knows and this node doesn't, and
+// returns them so they can be polled at once. A loopback address is only
+// meaningful if from is itself reached over loopback (the same machine).
+// The caller holds c.mu.
+func (c *Cluster) learnLocked(from *PeerState, refs []PeerRef) []*PeerState {
+	var added []*PeerState
+	for _, r := range refs {
+		if r.Name == "" || r.Name == c.self || c.knownLocked(r) {
+			continue
+		}
+		u, err := url.Parse(strings.TrimRight(r.URL, "/"))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || (loopback(u) && !loopback(from.parsed)) {
+			continue
+		}
+		p := &PeerState{Name: r.Name, URL: u.String(), parsed: u, Learned: true}
+		c.peers = append(c.peers, p)
+		added = append(added, p)
+		c.log.Info("peer learned", "peer", r.Name, "url", p.URL)
+	}
+	return added
+}
+
+func (c *Cluster) knownLocked(r PeerRef) bool {
+	want := strings.TrimRight(r.URL, "/")
+	for _, p := range c.peers {
+		if p.Name == r.Name || p.URL == want || (p.Node != nil && p.Node.Name == r.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Cluster) dropLocked(gone *PeerState) {
+	for i, p := range c.peers {
+		if p == gone {
+			c.peers = append(c.peers[:i], c.peers[i+1:]...)
+			c.log.Warn("learned peer dropped", "peer", gone.Name, "fails", gone.fails)
+			return
+		}
+	}
+}
+
+// loopback reports whether u points at the machine it's resolved on.
+func loopback(u *url.URL) bool {
+	h := u.Hostname()
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// Refs lists the peers to publish to other nodes: online ones, by node name.
+func (c *Cluster) Refs() []PeerRef {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var out []PeerRef
+	for _, p := range c.peers {
+		if !p.Online || p.Node == nil {
+			continue
+		}
+		out = append(out, PeerRef{Name: p.Node.Name, URL: p.URL})
+	}
+	return out
 }
 
 func (c *Cluster) fetch(ctx context.Context, p *PeerState) (*NodeInfo, error) {
@@ -169,7 +271,7 @@ func (c *Cluster) fetch(ctx context.Context, p *PeerState) (*NodeInfo, error) {
 // caused by a forwarded request (a model loading or unloading) show up
 // without waiting for the next poll interval.
 func (c *Cluster) Refresh(base *url.URL) {
-	for _, p := range c.peers {
+	for _, p := range c.snapshot() {
 		if p.parsed.String() == base.String() {
 			go func() {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

@@ -98,6 +98,7 @@ func newNodeWithKey(t *testing.T, yaml, key string, peers ...string) *node {
 		t.Fatal(err)
 	}
 	cl.SetAPIKey(key)
+	cl.SetSelf(cfg.Node.Name)
 	ctx, cancel := context.WithCancel(context.Background())
 	go cl.Run(ctx, time.Hour)
 	ts := httptest.NewServer(New(cfg, mgr, cl, nil, log).Handler())

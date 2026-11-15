@@ -350,6 +350,7 @@ func (s *Server) nodeInfo() cluster.NodeInfo {
 		Models:         s.mgr.Snapshot(),
 		Lock:           s.currentLock(),
 		Leases:         s.leaseList(),
+		Peers:          s.cluster.Refs(),
 		Hardware:       hardware(),
 	}
 }
