@@ -112,3 +112,11 @@ models:
 		}
 	}
 }
+
+func TestParseCount(t *testing.T) {
+	for in, want := range map[string]int64{"35B": 35e9, "3.5b": 35e8, "800M": 8e8, "1.2T": 12e11, "": 0, "big": 0, "12": 12} {
+		if got := ParseCount(in); got != want {
+			t.Errorf("ParseCount(%q) = %d, want %d", in, got, want)
+		}
+	}
+}

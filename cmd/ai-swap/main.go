@@ -58,10 +58,15 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 	if check {
 		return printPlan(cfg, mgr)
 	}
+	if k := os.Getenv("AI_SWAP_API_KEY"); k != "" {
+		cfg.Node.APIKey = k
+	}
 	cl, err := cluster.New(cfg.Peers, log)
 	if err != nil {
 		return err
 	}
+	cl.SetAPIKey(cfg.Node.APIKey)
+	cl.SetSelf(cfg.Node.Name)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -71,6 +76,7 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 
 	sv := server.New(cfg, mgr, cl, web.FS(), log)
 	go sv.ExpireLocks(ctx, 5*time.Second)
+	go sv.ExpireLeases(ctx, 5*time.Second)
 	srv := &http.Server{
 		Addr:              cfg.Node.Listen,
 		Handler:           sv.Handler(),
@@ -86,6 +92,7 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 	select {
 	case err := <-errc:
 		if !errors.Is(err, http.ErrServerClosed) {
+			sv.ReleaseLeases()
 			mgr.StopAll()
 			return err
 		}

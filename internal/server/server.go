@@ -23,6 +23,7 @@ import (
 	"github.com/hofftodd/ai-swap/internal/cluster"
 	"github.com/hofftodd/ai-swap/internal/config"
 	"github.com/hofftodd/ai-swap/internal/hostinfo"
+	"github.com/hofftodd/ai-swap/internal/modelinfo"
 	"github.com/hofftodd/ai-swap/internal/scheduler"
 	"github.com/hofftodd/ai-swap/internal/stats"
 	"github.com/hofftodd/ai-swap/internal/version"
@@ -50,6 +51,7 @@ type Server struct {
 	ui        fs.FS
 	stats     *stats.Recorder
 	lock      reservation // see lock.go
+	leases    leases      // see lease.go
 }
 
 // New builds the server. ui may be nil.
@@ -76,6 +78,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/lock", s.handleLockStatus)
 	mux.HandleFunc("POST /api/lock", s.handleLock)
 	mux.HandleFunc("DELETE /api/lock", s.handleUnlock)
+	mux.HandleFunc("GET /api/leases", s.handleLeaseStatus)
+	mux.HandleFunc("POST /api/leases", s.handleLease)
+	mux.HandleFunc("DELETE /api/leases/{id}", s.handleLeaseRelease)
 	// llama-swap compatibility (llamaswap.go).
 	mux.HandleFunc("GET /running", s.handleRunning)
 	mux.HandleFunc("GET /unload", s.handleUnloadAll)
@@ -84,7 +89,7 @@ func (s *Server) Handler() http.Handler {
 	if s.ui != nil {
 		mux.Handle("GET /", http.FileServerFS(s.ui))
 	}
-	return s.logRequests(mux)
+	return s.requireKey(s.logRequests(mux))
 }
 
 // route describes where a request for a model should go.
@@ -242,6 +247,10 @@ func (s *Server) proxy(w http.ResponseWriter, r *http.Request, body []byte, targ
 			pr.Out.Header.Set("Content-Length", strconv.Itoa(len(body)))
 			if hop {
 				pr.Out.Header.Set(cluster.HopHeader, "1")
+				if k := s.cluster.APIKey(); k != "" {
+					pr.Out.Header.Set("Authorization", "Bearer "+k)
+					pr.Out.Header.Del("x-api-key")
+				}
 			}
 		},
 		Transport:     s.transport,
@@ -340,6 +349,8 @@ func (s *Server) nodeInfo() cluster.NodeInfo {
 		Role:           s.cfg.Node.Role,
 		Models:         s.mgr.Snapshot(),
 		Lock:           s.currentLock(),
+		Leases:         s.leaseList(),
+		Peers:          s.cluster.Refs(),
 		Hardware:       hardware(),
 	}
 }
@@ -534,8 +545,11 @@ type modelStats struct {
 	Config   modelConfig      `json:"config"`
 	RSSBytes int64            `json:"rss_bytes,omitempty"`
 	Backend  *stats.Backend   `json:"backend,omitempty"`
-	GPUs     []stats.GPU      `json:"gpus,omitempty"`
-	Requests stats.Summary    `json:"requests"`
+	// File is what the model's files (and its config overrides) say it is;
+	// unlike Backend it is known whether or not the model is loaded.
+	File     *modelinfo.Info `json:"file,omitempty"`
+	GPUs     []stats.GPU     `json:"gpus,omitempty"`
+	Requests stats.Summary   `json:"requests"`
 }
 
 type modelConfig struct {
@@ -546,6 +560,9 @@ type modelConfig struct {
 	Args       []string `json:"args,omitempty"`
 	BudgetGB   float64  `json:"node_budget_gb"`
 	NodeUsedGB float64  `json:"node_used_gb"`
+	// KVCache is the KV cache type from the engine flags (llama.cpp's
+	// --cache-type-k/-v), e.g. "q8_0"; empty means the engine default.
+	KVCache string `json:"kv_cache,omitempty"`
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -572,6 +589,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	if out.Config.Model == "" && m.Cmd != "" {
 		out.Config.Model = m.Cmd
 	}
+	out.Config.KVCache = kvCache(append(append([]string(nil), s.cfg.Engines[m.Engine].Args...), m.Args...))
+	out.File = fileInfo(m)
 	for _, st := range s.mgr.Snapshot() {
 		if st.Name == rt.local {
 			out.Status = st
@@ -582,4 +601,53 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		out.Backend = stats.ProbeBackend(r.Context(), out.Status.Engine, out.Status.Port)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// fileInfo reads the model's files, then applies the config's overrides.
+func fileInfo(m *config.Model) *modelinfo.Info {
+	info := &modelinfo.Info{}
+	if m.Model != "" {
+		if i, err := modelinfo.Read(m.Model); err == nil {
+			c := *i
+			info = &c
+		}
+	}
+	if n := config.ParseCount(m.Params); n > 0 {
+		info.Params = n
+	}
+	if n := config.ParseCount(m.ActiveParams); n > 0 {
+		info.ActiveParams = n
+	}
+	if m.Quant != "" {
+		info.Quant = m.Quant
+	}
+	if info.Params > 0 && info.SizeBytes > 0 {
+		info.BitsPerW = float64(int(float64(info.SizeBytes*8)/float64(info.Params)*100+0.5)) / 100
+	}
+	if *info == (modelinfo.Info{}) {
+		return nil
+	}
+	return info
+}
+
+// kvCache reports the KV cache types set by llama.cpp-style flags.
+func kvCache(args []string) string {
+	var k, v string
+	for i := 0; i+1 < len(args); i++ {
+		switch args[i] {
+		case "--cache-type-k", "-ctk":
+			k = args[i+1]
+		case "--cache-type-v", "-ctv":
+			v = args[i+1]
+		}
+	}
+	switch {
+	case k == "" && v == "":
+		return ""
+	case k == v || v == "":
+		return k
+	case k == "":
+		return "v " + v
+	}
+	return "k " + k + ", v " + v
 }

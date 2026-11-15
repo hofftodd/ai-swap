@@ -19,6 +19,9 @@ see the [README](README.md).
 - [Design decisions](#design-decisions)
 - [Hardware notes](#hardware-notes)
 - [Testing](#testing)
+- [Leases](#leases)
+- [Authentication](#authentication)
+- [Model facts from files](#model-facts-from-files)
 - [Roadmap](#roadmap)
 
 ## Goals and non-goals
@@ -82,8 +85,9 @@ and knows about other machines only through what they report at
 | `internal/engine` | `Engine` interface, built-in adapters, command splitting | `config` |
 | `internal/process` | Start a process in its own process group, health polling, stop, log ring buffer | `engine` |
 | `internal/scheduler` | Per-model state machine, eviction planning, TTL reaper, crash detection | `config`, `engine`, `process` |
-| `internal/cluster` | Peer polling, peer state, choosing a peer for a model | `config`, `scheduler` (status types) |
-| `internal/server` | HTTP routing, reverse proxy, `/v1/models` merging, management API, error formats | all of the above |
+| `internal/cluster` | Peer polling, learning peers' peers, peer state, choosing a peer for a model | `config`, `scheduler` (status types) |
+| `internal/modelinfo` | Parameters, quantization and size read from GGUF and MLX file headers | – |
+| `internal/server` | HTTP routing, reverse proxy, `/v1/models` merging, management API, reservations, leases, API key, error formats | all of the above |
 | `internal/version` | Release version (overridable with `-ldflags -X`) | – |
 | `web` | Embedded `static/index.html` | – |
 
@@ -266,7 +270,12 @@ express (for example, finding models on disk), implement `Engine` directly.
 
 ## Multi-node routing
 
-- **Discovery** is static: `peers` in config. Each machine polls
+- **Discovery** starts from `peers` in config, and peers' peers are
+  learned: `/api/node` lists the online peers a machine knows (`peers`), and
+  a machine adds any it doesn't, then talks to them directly (forwarding stays
+  one hop). A learned peer is dropped after 3 failed polls in a row; a
+  loopback address is learned only from a peer that is itself on loopback.
+  Each machine polls
   `GET <peer>/api/node` every 10 s (5 s timeout). The answer contains the
   peer's name, version, OS/arch, memory budget and use, and a status for
   every model.
@@ -397,14 +406,45 @@ need Job Objects instead.
 go test -race ./...
 ```
 
+## Leases
+
+`lease.go`. A lease is `scheduler.Acquire` held open: taking one acquires the
+model (loading it like a request would) and keeps the release function until
+the lease is released or lapses, so the model counts as in flight for
+eviction and the reaper with no scheduler changes. Leases live in the server
+next to the reservation; `ExpireLeases` drops lapsed ones every 5 s, and
+`ReleaseLeases` runs on shutdown. A lease on a peer's model is forwarded and
+held there. Like in-flight requests, a lease can make a swap wait as long as
+it lasts, which is why its TTL is capped at an hour.
+
+## Authentication
+
+`auth.go`. With `node.api_key` set, a wrapper around the mux checks
+`Authorization: Bearer` or `x-api-key` (constant-time) on `/v1/`, `/api/`,
+`/upstream/`, `/running` and `/unload`. Peer polls and forwarded requests
+carry the shared key. The static UI is served without it and wraps `fetch`
+to send the key it asks for once.
+
+## Model facts from files
+
+`internal/modelinfo` reads GGUF metadata and tensor tables (all shards of a
+split file) and MLX's `config.json` plus safetensors headers, never the
+weights, cached by path and mtime. Parameters are counted from tensor shapes
+(MLX packs quantized weights into uint32, so the count is scaled by each
+layer's bits); active parameters for mixture-of-experts models count
+`experts_used/experts` of the stacked expert tensors and leave out embedding
+tables. When a GGUF's `general.file_type` doesn't match its tensors (hand-mixed
+quantizations), the label describes the mix. Config `params`,
+`active_params` and `quant` override.
+
 ## Roadmap
 
 Roughly in priority order:
 
 1. **Strata's non-interactive server command.** (Sushi's and ds4's flags
    were confirmed on an M5 Ultra; both now get assigned ports.)
-2. **Authentication.** A shared `node.api_key`, checked on inbound requests
-   (Bearer or `x-api-key`) and sent to peers.
+2. ~~**Authentication.**~~ Done: a shared `node.api_key` (see
+   Authentication above).
 3. **Fair swapping.** Add the "draining" flag described under
    [Scheduling](#scheduling-and-eviction).
 4. ~~**Smarter placement.**~~ Done: a model on several machines is served
