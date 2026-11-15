@@ -156,3 +156,28 @@ func TestLeaseOnPeerModel(t *testing.T) {
 		t.Fatalf("linux lease should be gone: %v", out)
 	}
 }
+
+func TestStatsDescribeUnloadedModel(t *testing.T) {
+	n := newNode(t, `
+node: {name: box, port_range: [19450, 19499]}
+models:
+  m:
+    engine: generic
+    cmd: "m-backend --port ${PORT}"
+    args: [--cache-type-k, q8_0, --cache-type-v, q8_0]
+    params: 35B
+    active_params: 3B
+    quant: Q4_K_M
+`)
+	code, out := send(t, "GET", n.url+"/api/models/m/stats", "")
+	if code != 200 {
+		t.Fatalf("stats: %d %v", code, out)
+	}
+	f, _ := out["file"].(map[string]any)
+	if f["params"] != float64(35e9) || f["active_params"] != float64(3e9) || f["quant"] != "Q4_K_M" {
+		t.Fatalf("file facts: %v", out["file"])
+	}
+	if c, _ := out["config"].(map[string]any); c["kv_cache"] != "q8_0" {
+		t.Fatalf("kv cache: %v", out["config"])
+	}
+}

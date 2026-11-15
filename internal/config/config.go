@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,6 +109,12 @@ type Model struct {
 	Aliases []string `yaml:"aliases"`
 	// UpstreamModel, if set, replaces the "model" field sent to the backend.
 	UpstreamModel string `yaml:"upstream_model"`
+	// Params, ActiveParams and Quant describe the model for the UI when its
+	// files don't say (or say it wrongly): sizes like "35B" or "3.5B", and a
+	// free-form quantization such as "Q4_K experts, Q8 attention".
+	Params       string `yaml:"params"`
+	ActiveParams string `yaml:"active_params"`
+	Quant        string `yaml:"quant"`
 }
 
 // Duration is a time.Duration that unmarshals from strings like "30m".
@@ -312,4 +319,32 @@ func ExpandHome(p string) string {
 		}
 	}
 	return p
+}
+
+// ParseCount parses a parameter count such as "35B", "3.5B", "671b" or "800M".
+// It returns 0 for "" or anything it can't read.
+func ParseCount(s string) int64 {
+	s = strings.TrimSpace(strings.ToUpper(s))
+	if s == "" {
+		return 0
+	}
+	mult := 1.0
+	switch s[len(s)-1] {
+	case 'K':
+		mult = 1e3
+	case 'M':
+		mult = 1e6
+	case 'B', 'G':
+		mult = 1e9
+	case 'T':
+		mult = 1e12
+	}
+	if mult != 1 {
+		s = s[:len(s)-1]
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	if err != nil || f < 0 {
+		return 0
+	}
+	return int64(f * mult)
 }

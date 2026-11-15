@@ -1041,6 +1041,11 @@ function statsHead(id, st) {
 
 function renderStats(id, d) {
   const st = d.status, c = d.config, b = d.backend || {}, q = d.requests || {}, mt = b.metrics || {};
+  // What the model is: its files (known even when unloaded), else the engine.
+  const f = d.file || {};
+  const params = f.params || b.params, quant = f.quant || b.quant, size = f.size_bytes || b.size_bytes;
+  const ctxTrain = b.ctx_train || f.ctx_train;
+  const paramsText = params ? fmtCount(params) + (f.active_params ? ` (${fmtCount(f.active_params)} active)` : "") : null;
   const ready = st.state === "ready", last = q.last;
   let h = statsHead(id, { ...st, node: d.node });
   if (st.error) h += `<div class="note bad">${esc(st.error)}</div>`;
@@ -1059,7 +1064,8 @@ function renderStats(id, d) {
   // One line of what the model is.
   const mods = (b.modalities || []).filter(x => x && x !== "text");
   const chips = [
-    b.params && fmtCount(b.params) + " params", b.quant, (b.ctx_per_slot || c.ctx) && fmtTok(b.ctx_per_slot || c.ctx) + " ctx",
+    paramsText && paramsText + " params", quant, f.bits_per_weight && f.bits_per_weight.toFixed(1) + " bits/weight",
+    (b.ctx_per_slot || c.ctx) && fmtTok(b.ctx_per_slot || c.ctx) + " ctx",
     ...mods, b.tools && "tools", (b.speculative || q.draft_accept_rate) && ("spec. decode" + (q.draft_accept_rate ? " " + Math.round(q.draft_accept_rate * 100) + "%" : "")),
   ].filter(Boolean);
   if (chips.length) h += `<div class="chips">${chips.map(x => `<span>${esc(x)}</span>`).join("")}</div>`;
@@ -1098,17 +1104,23 @@ function renderStats(id, d) {
     ${(d.gpus || []).map((g, i) => meter(`GPU ${i} VRAM (${fmtBytes(g.vram_total_bytes)})${g.busy_percent !== undefined ? ` · ${g.busy_percent}%` : ""}`, g.vram_used_bytes, g.vram_total_bytes)
       + (g.gtt_used_bytes > 256 * 1024 ** 2 ? meter(`GPU ${i} system RAM (GTT)`, g.gtt_used_bytes, g.gtt_total_bytes) : "")).join("")}
     <h3>Model</h3><dl>
-      ${row("Parameters", b.params ? fmtCount(b.params) : null)}
-      ${row("Quantization", b.quant ? esc(b.quant) : null)}
-      ${row("Weights", b.size_bytes ? fmtBytes(b.size_bytes) : null)}
+      ${row("Parameters", params ? fmtCount(params) : null, f.size_label ? "Size label in the file: " + f.size_label : null)}
+      ${row("Active per token", f.active_params ? fmtCount(f.active_params) : null,
+            "Mixture of experts: parameters used per token (embedding tables excluded). This sets speed; the total sets memory.")}
+      ${row("Experts", f.experts ? `${f.experts_used || "?"} of ${f.experts} per token` : null)}
+      ${row("Quantization", quant ? esc(quant) : null)}
+      ${row("Bits per weight", f.bits_per_weight ? f.bits_per_weight.toFixed(2) : null, "Weight size over parameter count: comparable across GGUF and MLX quantizations")}
+      ${row("Weights", size ? fmtBytes(size) : null)}
+      ${row("Architecture", f.arch ? esc(f.arch) + (f.format ? ` <span style="color:var(--muted)">${esc(f.format)}</span>` : "") : null)}
+      ${row("KV cache", c.kv_cache ? esc(c.kv_cache) : null, "Cache type from the engine flags (--cache-type-k/-v)")}
       ${row("Context / request", b.ctx_per_slot ? fmtTok(b.ctx_per_slot) : (c.ctx ? fmtTok(c.ctx) : null))}
       ${row("Context total", b.ctx && b.ctx !== b.ctx_per_slot ? fmtTok(b.ctx) : null)}
-      ${row("Trained context", b.ctx_train ? fmtTok(b.ctx_train) : null)}
+      ${row("Trained context", ctxTrain ? fmtTok(ctxTrain) : null)}
       ${row("Inputs", (b.modalities || []).length ? esc(b.modalities.join(", ")) : null)}
       ${row("Tool calling", b.tools === undefined ? null : b.tools ? "yes" : "no")}
       ${row("Vocabulary", b.vocab ? fmtCount(b.vocab) : null)}
       ${row("Embedding dim", b.embed_dim ? String(b.embed_dim) : null)}
-    </dl>${ready ? "" : `<div class="note">Load the model to see what the engine reports about it.</div>`}
+    </dl>${ready ? "" : `<div class="note">Load the model to see what the engine reports at run time (context per request, inputs, tool calling).</div>`}
     <h3>Backend</h3><dl>
       ${row("Engine", esc(st.engine) + (b.build ? ` <span style="color:var(--muted)">${esc(b.build)}</span>` : ""))}
       ${row("Loaded for", up ? fmtSecs(up) : null)}
