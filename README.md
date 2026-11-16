@@ -248,6 +248,8 @@ models:
     params: ""               # e.g. "35B": shown in the UI when the files don't say
     active_params: ""        # e.g. "3B": per token, for mixture-of-experts models
     quant: ""                # e.g. "Q4_K experts, Q8 attention": overrides what the files say
+    lab: ""                  # e.g. "DeepSeek": who made it, when the files don't say
+    url: ""                  # its model card, e.g. https://huggingface.co/<org>/<model>
 ```
 
 **`resident`** names the models a node keeps loaded by default, such as
@@ -375,7 +377,7 @@ From a script: `curl -o ~/.pi/agent/models.json http://studio.local:8080/api/cli
 | `POST /api/models/{name}/load` | Load a model now. `{name}` may be `model@node` |
 | `POST /api/models/{name}/unload` | Unload a model, even if a request is in progress |
 | `GET /api/models/{name}/logs` | Last 256 KB of the engine's stdout/stderr |
-| `GET /api/models/{name}/stats` | Live stats for the UI's stats pane: state, load time, process memory, GPU memory (Linux/AMD), what the model's files say it is (`file`: total and active parameters, quantization, bits per weight, weight size, architecture, trained context; known whether loaded or not), what the engine reports (context, slots, metrics), and request stats measured by ai-swap (tok/s, time to first token, tokens, draft acceptance) |
+| `GET /api/models/{name}/stats` | Live stats for the UI's stats pane: state, load time, process memory, GPU memory (Linux/AMD), what the model's files say it is (`file`: the lab and a link to the original model card, total and active parameters, quantization, bits per weight, weight size, architecture, trained context; known whether loaded or not), what the engine reports (context, slots, metrics), and request stats measured by ai-swap (tok/s, time to first token, tokens, draft acceptance) |
 | `GET /health` | Returns `ok` |
 | `POST /api/unload` | Unload every model on this machine (residents stay unloaded until used) |
 | `GET`/`POST`/`DELETE /api/lock` | Reserve this machine for one client, e.g. a benchmark run (see [Reservations](#reservations)) |

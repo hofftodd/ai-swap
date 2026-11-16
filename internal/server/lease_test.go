@@ -168,13 +168,16 @@ models:
     params: 35B
     active_params: 3B
     quant: Q4_K_M
+    lab: Example Lab
+    url: https://huggingface.co/example/m
 `)
 	code, out := send(t, "GET", n.url+"/api/models/m/stats", "")
 	if code != 200 {
 		t.Fatalf("stats: %d %v", code, out)
 	}
 	f, _ := out["file"].(map[string]any)
-	if f["params"] != float64(35e9) || f["active_params"] != float64(3e9) || f["quant"] != "Q4_K_M" {
+	if f["params"] != float64(35e9) || f["active_params"] != float64(3e9) || f["quant"] != "Q4_K_M" ||
+		f["lab"] != "Example Lab" || f["url"] != "https://huggingface.co/example/m" {
 		t.Fatalf("file facts: %v", out["file"])
 	}
 	if c, _ := out["config"].(map[string]any); c["kv_cache"] != "q8_0" {

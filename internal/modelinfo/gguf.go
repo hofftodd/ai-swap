@@ -231,6 +231,26 @@ func readGGUF(path string) (*Info, error) {
 	info.Arch = arch
 	info.Name, _ = kv["general.name"].(string)
 	info.SizeLabel, _ = kv["general.size_label"].(string)
+	// Who made it: the model's own organisation, else its base model's (a quantization or a
+	// fine-tune names the original). general.repo_url is often only the quantizer's page
+	// ("https://huggingface.co/unsloth"), so it counts only when it names a model.
+	org, _ := kv["general.organization"].(string)
+	baseOrg, _ := kv["general.base_model.0.organization"].(string)
+	baseURL, _ := kv["general.base_model.0.repo_url"].(string)
+	repoURL, _ := kv["general.repo_url"].(string)
+	if org == "" {
+		org = baseOrg
+	}
+	info.Lab = LabName(org)
+	switch {
+	case hfRepo(baseURL) != "":
+		info.URL, info.BaseModel = baseURL, hfRepo(baseURL)
+	case hfRepo(repoURL) != "":
+		info.URL, info.BaseModel = repoURL, hfRepo(repoURL)
+	}
+	if info.Lab == "" && info.BaseModel != "" {
+		info.Lab = LabName(strings.SplitN(info.BaseModel, "/", 2)[0])
+	}
 	ftName := ""
 	if ft, ok := kv["general.file_type"]; ok {
 		ftName = fileTypes[uint64(asInt(ft))]

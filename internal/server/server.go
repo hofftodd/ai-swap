@@ -621,6 +621,12 @@ func fileInfo(m *config.Model) *modelinfo.Info {
 	if m.Quant != "" {
 		info.Quant = m.Quant
 	}
+	if m.Lab != "" {
+		info.Lab = m.Lab
+	}
+	if strings.HasPrefix(m.URL, "https://") || strings.HasPrefix(m.URL, "http://") {
+		info.URL = m.URL
+	}
 	if info.Params > 0 && info.SizeBytes > 0 {
 		info.BitsPerW = float64(int(float64(info.SizeBytes*8)/float64(info.Params)*100+0.5)) / 100
 	}

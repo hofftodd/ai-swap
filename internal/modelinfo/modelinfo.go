@@ -6,6 +6,7 @@
 package modelinfo
 
 import (
+	"bufio"
 	"errors"
 	"os"
 	"path/filepath"
@@ -30,6 +31,9 @@ type Info struct {
 	BitsPerW     float64 `json:"bits_per_weight,omitempty"`
 	CtxTrain     int     `json:"ctx_train,omitempty"`
 	SizeLabel    string  `json:"size_label,omitempty"` // general.size_label, e.g. "35B-A3B"
+	Lab          string  `json:"lab,omitempty"`        // who made the model, e.g. "Qwen (Alibaba)"
+	URL          string  `json:"url,omitempty"`        // the original model card, e.g. on Hugging Face
+	BaseModel    string  `json:"base_model,omitempty"` // its Hugging Face id, e.g. "Qwen/Qwen3.8-27B"
 }
 
 type entry struct {
@@ -67,6 +71,7 @@ func Read(path string) (*Info, error) {
 		err = errors.New("not a .gguf file or model directory")
 	}
 	if info != nil {
+		info.origin(path, st.IsDir())
 		info.finish()
 	}
 	mu.Lock()
@@ -100,4 +105,119 @@ func shards(path string) []string {
 	}
 	sort.Strings(all)
 	return all
+}
+
+// labNames gives Hugging Face organisations a readable name; others show as they are.
+var labNames = map[string]string{
+	"qwen": "Qwen (Alibaba)", "google": "Google", "nvidia": "NVIDIA", "deepseek-ai": "DeepSeek",
+	"deepseek": "DeepSeek", "meta-llama": "Meta", "mistralai": "Mistral AI", "microsoft": "Microsoft",
+	"openai": "OpenAI", "thinkingmachines": "Thinking Machines Lab", "zai-org": "Z.ai",
+	"moonshotai": "Moonshot AI", "ibm-granite": "IBM", "allenai": "Ai2", "nanbeige": "Nanbeige",
+	"minimaxai": "MiniMax", "baidu": "Baidu", "tencent": "Tencent", "xiaomimimo": "Xiaomi",
+	"ricursiveai": "Ricursive",
+}
+
+// LabName is the readable name for an organisation (a Hugging Face handle or a GGUF
+// general.organization value).
+func LabName(org string) string {
+	org = strings.TrimSpace(org)
+	if n, ok := labNames[strings.ToLower(org)]; ok {
+		return n
+	}
+	return org
+}
+
+// hfRepo is the "org/name" of a Hugging Face model URL, or "".
+func hfRepo(u string) string {
+	const pre = "https://huggingface.co/"
+	if !strings.HasPrefix(u, pre) {
+		return ""
+	}
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(u, pre), "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	return parts[0] + "/" + parts[1]
+}
+
+// origin fills Lab, URL and BaseModel from the README next to the model: Hugging Face model
+// cards start with YAML front matter whose base_model names the original ("Qwen/Qwen3.8-27B").
+// GGUF metadata, read first, wins. For a GGUF the README counts only when it is the sole
+// model in its folder, so one README isn't credited to several models.
+func (i *Info) origin(path string, isDir bool) {
+	dir := path
+	if !isDir {
+		dir = filepath.Dir(path)
+		ggufs, _ := filepath.Glob(filepath.Join(dir, "*.gguf"))
+		n := 0
+		for _, g := range ggufs {
+			b := strings.ToLower(filepath.Base(g))
+			if !strings.Contains(b, "mmproj") && !shardRe.MatchString(filepath.Base(g)) || strings.Contains(b, "-00001-of-") {
+				n++
+			}
+		}
+		if n != 1 {
+			return
+		}
+	}
+	base := readmeBaseModel(filepath.Join(dir, "README.md"))
+	if base == "" {
+		return
+	}
+	if i.BaseModel == "" {
+		i.BaseModel = base
+	}
+	if i.Lab == "" {
+		i.Lab = LabName(strings.SplitN(base, "/", 2)[0])
+	}
+	if i.URL == "" {
+		i.URL = "https://huggingface.co/" + base
+	}
+}
+
+// readmeBaseModel reads base_model from a model card's YAML front matter (a string, or the
+// first item of a list), or "".
+func readmeBaseModel(path string) string {
+	f, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	sc := bufio.NewScanner(f)
+	inFront, inList := false, false
+	for n := 0; sc.Scan() && n < 80; n++ {
+		line := strings.TrimRight(sc.Text(), " \t")
+		if line == "---" {
+			if inFront {
+				return ""
+			}
+			inFront = true
+			continue
+		}
+		if !inFront {
+			return "" // no front matter
+		}
+		if inList {
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "- "); ok {
+				return cleanRepo(v)
+			}
+			inList = false
+		}
+		if v, ok := strings.CutPrefix(line, "base_model:"); ok {
+			if v = strings.TrimSpace(v); v == "" {
+				inList = true
+				continue
+			}
+			return cleanRepo(strings.Trim(v, "[]"))
+		}
+	}
+	return ""
+}
+
+func cleanRepo(v string) string {
+	v = strings.Trim(strings.TrimSpace(strings.SplitN(v, ",", 2)[0]), `"'`)
+	if strings.Count(v, "/") != 1 || strings.ContainsAny(v, " <>") {
+		return ""
+	}
+	return v
 }
