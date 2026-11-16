@@ -233,7 +233,7 @@ func TestReadmeOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Lab != "ricursiveAI" || info.BaseModel != "ricursiveAI/Ripple-65B-Preview" {
+	if info.Lab != "Ricursive" || info.BaseModel != "ricursiveAI/Ripple-65B-Preview" {
 		t.Fatalf("gguf readme origin: %+v", info)
 	}
 
