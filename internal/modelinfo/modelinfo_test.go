@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type ggufKV struct {
@@ -186,5 +187,61 @@ func TestReadErrors(t *testing.T) {
 	}
 	if _, err := Read(t.TempDir()); err == nil {
 		t.Fatal("dir without config.json")
+	}
+}
+
+func TestGGUFOrigin(t *testing.T) {
+	dir := t.TempDir()
+	// A quantization: general.repo_url is only the quantizer's page; the base model says who.
+	path := filepath.Join(dir, "gemma-Q4_K_M.gguf")
+	writeGGUF(t, path, []ggufKV{
+		{"general.architecture", ggufString, "gemma4"},
+		{"general.repo_url", ggufString, "https://huggingface.co/unsloth"},
+		{"general.base_model.0.organization", ggufString, "Google"},
+		{"general.base_model.0.repo_url", ggufString, "https://huggingface.co/google/gemma-4-E4B-it"},
+	}, []ggufT{{"a.weight", []uint64{10, 10}, 12}})
+	info, err := Read(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Lab != "Google" || info.URL != "https://huggingface.co/google/gemma-4-E4B-it" || info.BaseModel != "google/gemma-4-E4B-it" {
+		t.Fatalf("origin: %+v", info)
+	}
+}
+
+func TestReadmeOrigin(t *testing.T) {
+	// MLX folder: README front matter with base_model as a string.
+	dir := t.TempDir()
+	cfg := `{"model_type":"qwen3","quantization":{"bits":4,"group_size":64}}`
+	_ = os.WriteFile(filepath.Join(dir, "config.json"), []byte(cfg), 0o644)
+	writeSafetensors(t, filepath.Join(dir, "model.safetensors"), map[string]stTensor{"w": {"BF16", []int64{10}}})
+	_ = os.WriteFile(filepath.Join(dir, "README.md"), []byte("---\nlibrary_name: mlx\nbase_model: Qwen/Qwen3.8-27B\n---\n# hi\n"), 0o644)
+	info, err := Read(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Lab != "Qwen (Alibaba)" || info.URL != "https://huggingface.co/Qwen/Qwen3.8-27B" {
+		t.Fatalf("mlx origin: %+v", info)
+	}
+
+	// A GGUF alone in its folder, base_model as a list; no metadata of its own.
+	gdir := t.TempDir()
+	g := filepath.Join(gdir, "ripple-Q4_K_M.gguf")
+	writeGGUF(t, g, []ggufKV{{"general.architecture", ggufString, "ricursive"}}, []ggufT{{"a.weight", []uint64{10, 10}, 12}})
+	_ = os.WriteFile(filepath.Join(gdir, "README.md"), []byte("---\nbase_model:\n  - ricursiveAI/Ripple-65B-Preview\n---\n"), 0o644)
+	info, err = Read(g)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Lab != "Ricursive" || info.BaseModel != "ricursiveAI/Ripple-65B-Preview" {
+		t.Fatalf("gguf readme origin: %+v", info)
+	}
+
+	// Two models share the folder: the README is credited to neither.
+	writeGGUF(t, filepath.Join(gdir, "other-Q8_0.gguf"), nil, []ggufT{{"b.weight", []uint64{10}, 8}})
+	_ = os.Chtimes(g, time.Now(), time.Now().Add(time.Second)) // invalidate the cache
+	info, _ = Read(g)
+	if info.Lab != "" || info.URL != "" {
+		t.Fatalf("shared folder should not be credited: %+v", info)
 	}
 }

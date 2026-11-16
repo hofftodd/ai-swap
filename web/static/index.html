@@ -1070,6 +1070,9 @@ function renderStats(id, d) {
   const params = f.params || b.params, quant = f.quant || b.quant, size = f.size_bytes || b.size_bytes;
   const ctxTrain = b.ctx_train || f.ctx_train;
   const paramsText = params ? fmtCount(params) + (f.active_params ? ` (${fmtCount(f.active_params)} active)` : "") : null;
+  // Only http(s) links: the URL comes from model files and config.
+  const cardURL = /^https?:\/\//.test(f.url || "") ? f.url : "";
+  const cardLink = cardURL ? `<a href="${esc(cardURL)}" target="_blank" rel="noopener noreferrer">${esc(f.base_model || cardURL.replace(/^https?:\/\/(www\.)?/, ""))} ↗</a>` : null;
   const ready = st.state === "ready", last = q.last;
   let h = statsHead(id, { ...st, node: d.node });
   if (st.error) h += `<div class="note bad">${esc(st.error)}</div>`;
@@ -1088,7 +1091,7 @@ function renderStats(id, d) {
   // One line of what the model is.
   const mods = (b.modalities || []).filter(x => x && x !== "text");
   const chips = [
-    paramsText && paramsText + " params", quant, f.bits_per_weight && f.bits_per_weight.toFixed(1) + " bits/weight",
+    f.lab, paramsText && paramsText + " params", quant, f.bits_per_weight && f.bits_per_weight.toFixed(1) + " bits/weight",
     (b.ctx_per_slot || c.ctx) && fmtTok(b.ctx_per_slot || c.ctx) + " ctx",
     ...mods, b.tools && "tools", (b.speculative || q.draft_accept_rate) && ("spec. decode" + (q.draft_accept_rate ? " " + Math.round(q.draft_accept_rate * 100) + "%" : "")),
   ].filter(Boolean);
@@ -1128,6 +1131,8 @@ function renderStats(id, d) {
     ${(d.gpus || []).map((g, i) => meter(`GPU ${i} VRAM (${fmtBytes(g.vram_total_bytes)})${g.busy_percent !== undefined ? ` · ${g.busy_percent}%` : ""}`, g.vram_used_bytes, g.vram_total_bytes)
       + (g.gtt_used_bytes > 256 * 1024 ** 2 ? meter(`GPU ${i} system RAM (GTT)`, g.gtt_used_bytes, g.gtt_total_bytes) : "")).join("")}
     <h3>Model</h3><dl>
+      ${row("Lab", f.lab ? esc(f.lab) : null)}
+      ${row("Model card", cardLink, "The original model's page; set url: in the config if it's missing or wrong")}
       ${row("Parameters", params ? fmtCount(params) : null, f.size_label ? "Size label in the file: " + f.size_label : null)}
       ${row("Active per token", f.active_params ? fmtCount(f.active_params) : null,
             "Mixture of experts: parameters used per token (embedding tables excluded). This sets speed; the total sets memory.")}

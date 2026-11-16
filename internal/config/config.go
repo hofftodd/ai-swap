@@ -115,6 +115,10 @@ type Model struct {
 	Params       string `yaml:"params"`
 	ActiveParams string `yaml:"active_params"`
 	Quant        string `yaml:"quant"`
+	// Lab and URL name who made the model and link its model card, for models whose files
+	// don't say (GGUF metadata and a README's base_model are read otherwise).
+	Lab string `yaml:"lab"`
+	URL string `yaml:"url"`
 }
 
 // Duration is a time.Duration that unmarshals from strings like "30m".
