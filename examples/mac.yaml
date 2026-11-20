@@ -25,6 +25,10 @@ engines:
     bin: /opt/homebrew/bin/omlx
     # oMLX sizes its SSD prompt cache to half the free disk by default, per model.
     args: [--paged-ssd-cache-max-size, 50GB]
+  splash:
+    bin: /opt/homebrew/bin/splash
+    # Splash's SSD prompt cache is capped (32 GiB by default) and dropped at exit.
+    args: [--max-cache-disk, 16G]
   ds4:
     bin: ~/src/ds4/ds4-server
     dir: ~/src/ds4
@@ -52,6 +56,17 @@ models:
     engine: omlx
     model: ~/models/omlx/flint-oq4e
     memory_gb: 36
+
+  # flint on Splash (DFlash2 speculative decoding): a local GGUF, served to
+  # Splash as ai-swap/flint-splash. Its draft comes from the Hugging Face cache
+  # (`hf download incoai/Flint-DFlash2`). --activations bf16 matches the other
+  # engines' quality at no measurable speed cost.
+  flint-splash:
+    engine: splash
+    model: ~/models/flint/flint-UD-Q4_K_XL.gguf
+    ctx: 131072
+    memory_gb: 40
+    args: [--activations, bf16, --language-only]
 
   # Anything else that speaks the OpenAI API, e.g. a small MLX model for
   # quick tasks. ${PORT} is assigned by ai-swap.

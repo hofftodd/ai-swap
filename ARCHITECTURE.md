@@ -240,6 +240,7 @@ shell commands.
 | `sushi` | `sushi --serve` | `--model` / `--ctx-size` | `--port` (assigned), `--host` | `/v1/models` | darwin | `sushi --help` (1.4.1) |
 | `ds4` | `ds4-server` | `-m` / `--ctx` | `--port` (assigned), `--host` | `/v1/models` | darwin, linux | `ds4-server --help` |
 | `omlx` | `omlx serve` | `--model-dir` = parent of `model` | `--port` (assigned), `--host` | `/v1/models`, then POST `/v1/models/{id}/load` | darwin | `omlx serve --help` (0.7.3) |
+| `splash` | `splash serve` | `--model ai-swap/<name>` + `--model-dir` = `model` (local), or `--model` = `model` (Hub id) / `--max-context` | `--port` (assigned), `--host` | `/ready` | darwin | `splash serve --help` (1.7.0) |
 | `strata` | (needs `cmd`) | – | fixed 8080 or `${PORT}` | `/v1/models` | any | Strata README |
 | `generic` | (needs `cmd`) | – | `${PORT}` or `port` | `/v1/models` | any | – |
 

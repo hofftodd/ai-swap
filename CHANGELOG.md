@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Engine `splash`: [Splash](https://github.com/incoai/splash) (DFlash2 speculative
+  decoding, Apple Silicon). `model:` is a local GGUF file or GGUF/MLX folder,
+  or a Hugging Face `OWNER/REPO:VARIANT`; local models are served under
+  `ai-swap/<name>` (Splash wants an OWNER/REPO name and answers to nothing
+  else) and requests are renamed to it. `ctx` sets `--max-context`, readiness
+  is `/ready`, and Splash's own idle release is off so `ttl` decides. On the
+  Mac Studio it ran Qwen3.8-Flash-Next at oMLX's quality with 40% shorter
+  LiveCodeBench runs, and flint at 2.4x llama.cpp's decode.
+
 - Placement: a model defined on several machines is served where it needs no
   swap. A machine with it loaded wins (the least busy one), then one where it
   fits in free memory, then this machine as before. Machines reserved by
