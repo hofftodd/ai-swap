@@ -1,5 +1,5 @@
 // Package engine turns a model config into a runnable server command for a
-// specific inference engine (Sushi, ds4, Strata, llama.cpp, or anything that
+// specific inference engine (Sushi, ds4, oMLX, Splash, Strata, llama.cpp, or anything that
 // speaks the OpenAI API).
 package engine
 
@@ -228,6 +228,43 @@ func init() {
 		},
 	})
 
+	// Splash: a Metal engine built around DFlash2 speculative decoding
+	// (Apple Silicon, M3 or newer; checked against Splash 1.7.0 on an M5
+	// Ultra). `model:` is either a local GGUF file (any part of a split one)
+	// or GGUF/MLX directory, served with --model-dir, or a Hugging Face
+	// `OWNER/REPO[:VARIANT]` it downloads itself. Splash answers only to the
+	// name given with --model, which must look like OWNER/REPO, so local
+	// models are named `ai-swap/<model name>` and requests are rewritten to
+	// that. A family's DFlash2 draft must already be in the Hugging Face cache
+	// for a local model (`hf download incoai/<family>-DFlash2`). /ready turns
+	// 200 once the weights are loaded. ai-swap's ttl owns unloading, so
+	// Splash's own idle release is off.
+	register(&builtin{
+		name: "splash", bin: "splash", subcmd: []string{"serve"},
+		goos:    []string{"darwin"},
+		caps:    Caps{OpenAI: true, Anthropic: true},
+		ctxFlag: "--max-context", portFlag: "--port", hostFlag: "--host",
+		healthPath: "/ready",
+		upstream:   splashUpstream,
+		extra: func(m *config.Model, ec config.EngineConfig) []string {
+			var out []string
+			if m.Model != "" {
+				out = append(out, "--model", firstNonEmpty(m.UpstreamModel, splashUpstream(m)))
+				if splashLocal(m.Model) {
+					out = append(out, "--model-dir", m.Model)
+				}
+			}
+			has := func(f string) bool { return slices.Contains(m.Args, f) || slices.Contains(ec.Args, f) }
+			if !has("--idle-release") {
+				out = append(out, "--idle-release", "off")
+			}
+			if !has("--no-webui") {
+				out = append(out, "--no-webui")
+			}
+			return out
+		},
+	})
+
 	// Strata: its documented entry point (`strata launch`) is interactive,
 	// so a non-interactive server command must be given via cmd until the
 	// adapter learns the real flags. Default address 127.0.0.1:8080.
@@ -250,6 +287,19 @@ func upstreamOf(m *config.Model) string {
 		return m.UpstreamModel
 	}
 	return filepath.Base(m.Model)
+}
+
+// splashLocal reports whether a Splash model: is a file or directory on
+// disk (config has already expanded ~) rather than a Hugging Face id.
+func splashLocal(model string) bool { return strings.HasPrefix(model, "/") }
+
+// splashUpstream is the API name Splash serves a model under: the Hugging
+// Face id itself, or ai-swap/<name> for local files (it must be OWNER/REPO).
+func splashUpstream(m *config.Model) string {
+	if !splashLocal(m.Model) {
+		return m.Model
+	}
+	return "ai-swap/" + strings.NewReplacer("/", "-", ":", "-", " ", "-").Replace(m.Name)
 }
 
 // ApplyDefaults fills in engine-specific defaults that live on the model

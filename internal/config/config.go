@@ -82,7 +82,7 @@ type EngineConfig struct {
 type Model struct {
 	// Name is filled in from the map key.
 	Name string `yaml:"-"`
-	// Engine selects the adapter: sushi, ds4, strata, llamacpp, generic.
+	// Engine selects the adapter: sushi, ds4, omlx, splash, strata, llamacpp, generic.
 	Engine string `yaml:"engine"`
 	// Model is the model path or identifier the engine expects.
 	Model string `yaml:"model"`

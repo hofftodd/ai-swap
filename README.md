@@ -88,6 +88,7 @@ the problem:
 | [Sushi](https://github.com/joshuaswarren/sushi) | `sushi` | macOS, Apple Silicon | OpenAI + Anthropic | Checked on an M5 Ultra (sushi 1.4.1): `sushi --serve`, ports assigned by ai-swap |
 | [ds4 / DwarfStar4](https://github.com/antirez/ds4) | `ds4` | macOS (Metal), Linux (DGX Spark CUDA, Strix Halo ROCm) | OpenAI + Anthropic | Checked on an M5 Ultra: ports assigned by ai-swap |
 | [oMLX](https://github.com/jundot/omlx) | `omlx` | macOS, Apple Silicon | OpenAI + Anthropic | Checked on an M5 Ultra (oMLX 0.7.3). `model:` is the model's folder; weights load before `ready` |
+| [Splash](https://github.com/incoai/splash) | `splash` | macOS, Apple Silicon (M3 or newer) | OpenAI + Anthropic | Checked on an M5 Ultra (Splash 1.7.0). `model:` is a local GGUF file or GGUF/MLX folder (its DFlash2 draft must be in the Hugging Face cache) or a Hub `OWNER/REPO:VARIANT`; requests are renamed to Splash's `ai-swap/<name>`. Ready when `/ready` answers |
 | [Strata](https://github.com/Niko1221/Strata) | `strata` | NVIDIA, AMD (incl. Radeon AI PRO R9700), Apple Silicon | OpenAI + Anthropic | Needs `cmd:`, because `strata launch` is interactive. Fixed port 8080 unless your `cmd:` uses `${PORT}` |
 | Anything OpenAI-compatible | `generic` | anywhere | OpenAI | You supply `cmd:` |
 
@@ -232,7 +233,7 @@ engines:                     # per-machine install details, keyed by engine name
 
 models:
   deepseek-v4-flash:         # the name clients send as "model"
-    engine: ds4              # sushi | ds4 | strata | llamacpp | generic
+    engine: ds4              # sushi | ds4 | omlx | splash | strata | llamacpp | generic
     model: ds4flash.gguf     # path or id passed to the engine's model flag
     ctx: 65536               # context length; omitted = engine default
     memory_gb: 100           # expected footprint, used for the budget

@@ -144,3 +144,46 @@ func TestUnknownEngine(t *testing.T) {
 		t.Fatalf("want error listing engines, got %v", err)
 	}
 }
+
+func TestSplash(t *testing.T) {
+	cfg := &config.Config{Models: map[string]*config.Model{
+		"flint-splash": {Name: "flint-splash", Engine: "splash", Model: "/m/flint/flint-UD-Q4_K_XL.gguf", Ctx: 131072},
+		"hub":          {Name: "hub", Engine: "splash", Model: "unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M", Args: []string{"--idle-release", "30m"}},
+		"pinned":       {Name: "pinned", Engine: "splash", Model: "/m/x", UpstreamModel: "me/x"},
+	}}
+	ApplyDefaults(cfg)
+	e, err := Get("splash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !e.Caps().Anthropic || !e.Caps().OpenAI {
+		t.Errorf("caps = %+v", e.Caps())
+	}
+	tests := []struct {
+		name, upstream string
+		argv           []string
+	}{
+		{"flint-splash", "ai-swap/flint-splash", []string{"splash", "serve", "--max-context", "131072", "--host", "127.0.0.1", "--port", "9100",
+			"--model", "ai-swap/flint-splash", "--model-dir", "/m/flint/flint-UD-Q4_K_XL.gguf", "--idle-release", "off", "--no-webui"}},
+		{"hub", "unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M", []string{"splash", "serve", "--host", "127.0.0.1", "--port", "9100",
+			"--model", "unsloth/Qwen3.8-27B-GGUF:UD-Q4_K_M", "--no-webui", "--idle-release", "30m"}},
+		{"pinned", "me/x", []string{"splash", "serve", "--host", "127.0.0.1", "--port", "9100",
+			"--model", "me/x", "--model-dir", "/m/x", "--idle-release", "off", "--no-webui"}},
+	}
+	for _, tt := range tests {
+		m := cfg.Models[tt.name]
+		if m.UpstreamModel != tt.upstream {
+			t.Errorf("%s upstream = %q, want %q", tt.name, m.UpstreamModel, tt.upstream)
+		}
+		l, err := e.Build(m, config.EngineConfig{}, alloc(9100))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(l.Argv, tt.argv) {
+			t.Errorf("%s argv\n got %q\nwant %q", tt.name, l.Argv, tt.argv)
+		}
+		if l.HealthPath != "/ready" || l.Port != 9100 {
+			t.Errorf("%s health %q port %d", tt.name, l.HealthPath, l.Port)
+		}
+	}
+}
