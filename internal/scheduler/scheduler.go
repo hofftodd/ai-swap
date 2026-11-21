@@ -85,6 +85,8 @@ type Status struct {
 	Caps     engine.Caps `json:"caps"`
 	Runnable bool        `json:"runnable"`
 	Resident bool        `json:"resident,omitempty"`
+	// Default is set on the node's default model (see Manager.DefaultModel).
+	Default bool `json:"default,omitempty"`
 	// LoadedAt is when the model became ready; LoadSeconds is how long that took.
 	LoadedAt    *time.Time `json:"loaded_at,omitempty"`
 	LoadSeconds float64    `json:"load_seconds,omitempty"`
@@ -105,6 +107,10 @@ type Manager struct {
 	mu        sync.Mutex
 	instances map[string]*Instance
 	changed   chan struct{} // closed and replaced whenever state changes
+	// resident and defaultModel start from the config and can be changed at
+	// runtime (SetResident, SetDefault); guarded by mu.
+	resident     []string
+	defaultModel string
 
 	// lifecycle serialises every start/stop so the memory plan is never
 	// computed against a half-applied previous plan.
@@ -118,12 +124,14 @@ type Manager struct {
 // New builds a manager for the models in cfg.
 func New(cfg *config.Config, log *slog.Logger) (*Manager, error) {
 	m := &Manager{
-		cfg:       cfg,
-		start:     defaultStart,
-		log:       log,
-		instances: map[string]*Instance{},
-		changed:   make(chan struct{}),
-		lifecycle: make(chan struct{}, 1),
+		cfg:          cfg,
+		start:        defaultStart,
+		log:          log,
+		instances:    map[string]*Instance{},
+		changed:      make(chan struct{}),
+		lifecycle:    make(chan struct{}, 1),
+		resident:     append([]string(nil), cfg.Node.Resident...),
+		defaultModel: cfg.Node.DefaultModel,
 	}
 	for _, name := range cfg.ModelNames() {
 		mc := cfg.Models[name]
@@ -236,7 +244,7 @@ func (m *Manager) Unload(ctx context.Context, name string) error {
 	}
 	defer m.unlock()
 	m.mu.Lock()
-	inst.held = m.cfg.IsResident(name)
+	inst.held = m.isResidentLocked(name)
 	m.mu.Unlock()
 	m.stop(inst)
 	return nil
@@ -296,7 +304,7 @@ func (m *Manager) RunReaper(ctx context.Context, every time.Duration) {
 // without evicting anything. It never waits: if a swap is in progress or a
 // client is queued for one, it tries again on the next tick.
 func (m *Manager) restoreResidents() {
-	for _, name := range m.cfg.Node.Resident {
+	for _, name := range m.Residents() {
 		if m.waiting.Load() > 0 {
 			return
 		}
@@ -332,7 +340,7 @@ func (m *Manager) reapOnce(now time.Time) {
 	m.mu.Lock()
 	for _, inst := range m.instances {
 		ttl := inst.Model.TTL.D()
-		if m.cfg.IsResident(inst.Model.Name) {
+		if m.isResidentLocked(inst.Model.Name) {
 			continue // residents give way to memory pressure, not idleness
 		}
 		if inst.state == Ready && inst.inflight == 0 && ttl > 0 && now.Sub(inst.lastUsed) > ttl {
@@ -351,6 +359,7 @@ func (m *Manager) Snapshot() []Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	out := make([]Status, 0, len(m.instances))
+	def := m.defaultLocked()
 	for _, name := range m.cfg.ModelNames() {
 		inst := m.instances[name]
 		s := Status{
@@ -358,7 +367,8 @@ func (m *Manager) Snapshot() []Status {
 			MemoryGB: inst.Model.MemoryGB, Ctx: inst.Model.Ctx, Inflight: inst.inflight,
 			Error: inst.lastErr, Aliases: inst.Model.Aliases,
 			Caps: inst.Engine.Caps(), Runnable: inst.Engine.Supported(),
-			Resident: m.cfg.IsResident(name),
+			Resident: m.isResidentLocked(name),
+			Default:  name == def,
 		}
 		if inst.state == Ready || inst.state == Starting {
 			s.Port = inst.port
@@ -379,6 +389,93 @@ func (m *Manager) Snapshot() []Status {
 		out = append(out, s)
 	}
 	return out
+}
+
+// Residents returns the models currently kept loaded by default.
+func (m *Manager) Residents() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.resident...)
+}
+
+// IsResident reports whether name is currently a resident model.
+func (m *Manager) IsResident(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.isResidentLocked(name)
+}
+
+func (m *Manager) isResidentLocked(name string) bool {
+	for _, r := range m.resident {
+		if r == name {
+			return true
+		}
+	}
+	return false
+}
+
+// SetResident replaces the resident set. names must already be validated
+// (config.CheckResident). New residents are loaded by the reaper's next
+// restore if they fit, or by the caller with Load. A model that stops being
+// resident is unloaded once idle for its TTL, counted from now.
+func (m *Manager) SetResident(names []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	for _, old := range m.resident {
+		if inst := m.instances[old]; inst != nil && !contains(names, old) && inst.state == Ready && now.After(inst.lastUsed) {
+			inst.lastUsed = now
+		}
+	}
+	for _, n := range names {
+		if inst := m.instances[n]; inst != nil && !contains(m.resident, n) {
+			inst.held = false // a new resident comes back even if it was unloaded by hand
+		}
+	}
+	m.resident = append([]string(nil), names...)
+	m.notifyLocked()
+}
+
+// DefaultModel is the model serving requests that name none: the configured
+// default, else the first resident, else "".
+func (m *Manager) DefaultModel() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.defaultLocked()
+}
+
+// ConfiguredDefault is the explicitly set default model ("" if none).
+func (m *Manager) ConfiguredDefault() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.defaultModel
+}
+
+func (m *Manager) defaultLocked() string {
+	if m.defaultModel != "" {
+		return m.defaultModel
+	}
+	if len(m.resident) > 0 {
+		return m.resident[0]
+	}
+	return ""
+}
+
+// SetDefault sets the default model; "" falls back to the first resident.
+func (m *Manager) SetDefault(name string) {
+	m.mu.Lock()
+	m.defaultModel = name
+	m.notifyLocked()
+	m.mu.Unlock()
+}
+
+func contains(list []string, s string) bool {
+	for _, x := range list {
+		if x == s {
+			return true
+		}
+	}
+	return false
 }
 
 // UsedGB returns the memory reserved by starting/ready models.

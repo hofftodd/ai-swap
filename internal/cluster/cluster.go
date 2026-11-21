@@ -25,14 +25,16 @@ const HopHeader = "X-AI-Swap-Hop"
 
 // NodeInfo is what each node publishes at /api/node.
 type NodeInfo struct {
-	Name           string             `json:"name"`
-	Version        string             `json:"version"`
-	OS             string             `json:"os"`
-	Arch           string             `json:"arch"`
-	MemoryBudgetGB float64            `json:"memory_budget_gb"`
-	MemoryUsedGB   float64            `json:"memory_used_gb"`
-	Role           string             `json:"role,omitempty"`
-	Models         []scheduler.Status `json:"models"`
+	Name           string  `json:"name"`
+	Version        string  `json:"version"`
+	OS             string  `json:"os"`
+	Arch           string  `json:"arch"`
+	MemoryBudgetGB float64 `json:"memory_budget_gb"`
+	MemoryUsedGB   float64 `json:"memory_used_gb"`
+	Role           string  `json:"role,omitempty"`
+	// DefaultModel serves requests that name no model (or "default").
+	DefaultModel string             `json:"default_model,omitempty"`
+	Models       []scheduler.Status `json:"models"`
 	// Hardware describes the machine: OS, CPU, memory, GPUs, power, temperatures.
 	Hardware *hostinfo.Info `json:"hardware,omitempty"`
 	// Lock is set while a client (e.g. a benchmark run) has reserved this machine.

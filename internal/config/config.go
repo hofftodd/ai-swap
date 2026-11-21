@@ -39,6 +39,10 @@ type Node struct {
 	// evicted (least-recently-used first) when another model needs the
 	// memory; they come back once there is room again.
 	Resident []string `yaml:"resident"`
+	// DefaultModel serves requests that name no model, or the generic name
+	// "default". A local model or alias, or "model@node" for a peer's. When
+	// unset, the first resident model is the default.
+	DefaultModel string `yaml:"default_model"`
 	// Role is a short note shown with this machine in the UI, e.g. "ai-factory host" for a
 	// machine that runs other parts of the suite. Machines with a role are listed first.
 	Role string `yaml:"role"`
@@ -265,6 +269,13 @@ func (c *Config) validate() error {
 	if c.Node.MemoryBudgetGB > 0 && residentGB > c.Node.MemoryBudgetGB {
 		errs = append(errs, fmt.Sprintf("node.resident: models need %.0f GB together, over the node budget %.0f",
 			residentGB, c.Node.MemoryBudgetGB))
+	}
+	if d := c.Node.DefaultModel; d != "" && !strings.Contains(d, "@") {
+		if m, ok := c.Resolve(d); ok {
+			c.Node.DefaultModel = m.Name
+		} else {
+			errs = append(errs, fmt.Sprintf("node.default_model: unknown model %q", d))
+		}
 	}
 	for _, p := range c.Peers {
 		if p.Name == "" || p.URL == "" {

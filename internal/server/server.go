@@ -50,8 +50,9 @@ type Server struct {
 	transport http.RoundTripper
 	ui        fs.FS
 	stats     *stats.Recorder
-	lock      reservation // see lock.go
-	leases    leases      // see lease.go
+	lock      reservation   // see lock.go
+	leases    leases        // see lease.go
+	settings  settingsStore // see settings.go
 }
 
 // New builds the server. ui may be nil.
@@ -74,6 +75,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/models/{name}/unload", s.handleUnload)
 	mux.HandleFunc("GET /api/models/{name}/logs", s.handleLogs)
 	mux.HandleFunc("GET /api/models/{name}/stats", s.handleStats)
+	mux.HandleFunc("POST /api/models/{name}/resident", s.handleModelSetting)
+	mux.HandleFunc("DELETE /api/models/{name}/resident", s.handleModelSetting)
+	mux.HandleFunc("POST /api/models/{name}/default", s.handleModelSetting)
+	mux.HandleFunc("GET /api/settings", s.handleSettings)
+	mux.HandleFunc("PUT /api/settings", s.handlePutSettings)
+	mux.HandleFunc("DELETE /api/settings", s.handleResetSettings)
 	mux.HandleFunc("POST /api/unload", s.handleUnloadAll)
 	mux.HandleFunc("GET /api/lock", s.handleLockStatus)
 	mux.HandleFunc("POST /api/lock", s.handleLock)
@@ -163,8 +170,11 @@ func (s *Server) handleInference(w http.ResponseWriter, r *http.Request) {
 		s.apiError(w, r, http.StatusBadRequest, "invalid_request_error", "body must be JSON: "+err.Error())
 		return
 	}
+	if d := s.defaultName(head.Model); d != head.Model {
+		body, head.Model = rewriteModel(body, d), d
+	}
 	if head.Model == "" {
-		s.apiError(w, r, http.StatusBadRequest, "invalid_request_error", `"model" is required`)
+		s.apiError(w, r, http.StatusBadRequest, "invalid_request_error", `"model" is required (this node has no default model)`)
 		return
 	}
 
@@ -347,6 +357,7 @@ func (s *Server) nodeInfo() cluster.NodeInfo {
 		MemoryBudgetGB: s.cfg.Node.MemoryBudgetGB,
 		MemoryUsedGB:   s.mgr.UsedGB(),
 		Role:           s.cfg.Node.Role,
+		DefaultModel:   s.mgr.DefaultModel(),
 		Models:         s.mgr.Snapshot(),
 		Lock:           s.currentLock(),
 		Leases:         s.leaseList(),

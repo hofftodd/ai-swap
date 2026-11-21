@@ -318,3 +318,49 @@ func TestResidentRestoreYieldsToQueuedClient(t *testing.T) {
 		t.Fatalf("restore ran ahead of a queued client: %v", r.started)
 	}
 }
+
+func TestSetResident(t *testing.T) {
+	m, _ := newTestManager(t, residentCfg)
+	m.restoreResidents()
+	if d := m.DefaultModel(); d != "r" {
+		t.Fatalf("default = %q, want the first resident", d)
+	}
+
+	// No longer resident: unloaded by its TTL, counted from the change.
+	m.SetResident([]string{})
+	if m.IsResident("r") || m.DefaultModel() != "" {
+		t.Fatalf("still resident or default: %v %q", m.Residents(), m.DefaultModel())
+	}
+	m.reapOnce(time.Now().Add(30 * time.Second))
+	if s := states(m); s["r"] != Ready {
+		t.Fatalf("reaped before its TTL ran from the change: %v", s)
+	}
+	m.reapOnce(time.Now().Add(2 * time.Minute))
+	if s := states(m); s["r"] != Stopped {
+		t.Fatalf("former resident not reaped: %v", s)
+	}
+
+	// A model made resident after being unloaded by hand comes back.
+	if err := m.Unload(context.Background(), "x"); err != nil {
+		t.Fatal(err)
+	}
+	m.SetResident([]string{"x"})
+	m.restoreResidents()
+	if s := states(m); s["x"] != Ready || !snapshot(m, "x").Resident {
+		t.Fatalf("new resident not restored: %v", s)
+	}
+
+	m.SetDefault("r")
+	if m.DefaultModel() != "r" || m.ConfiguredDefault() != "r" || !snapshot(m, "r").Default || snapshot(m, "x").Default {
+		t.Fatalf("explicit default not reported: %q", m.DefaultModel())
+	}
+}
+
+func snapshot(m *Manager, name string) Status {
+	for _, s := range m.Snapshot() {
+		if s.Name == name {
+			return s
+		}
+	}
+	return Status{}
+}

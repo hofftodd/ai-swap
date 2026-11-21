@@ -24,7 +24,7 @@ import (
 //	claude    claude-swap    → ~/.local/bin/claude-swap (chmod +x)
 //
 // Query: default=<model id> (opencode's default model and claude-swap's
-// default; else the first model), endpoint=<http(s)://host:port> (else the
+// default; else the node's default model, else the first model), endpoint=<http(s)://host:port> (else the
 // address the request came in on).
 
 const (
@@ -74,6 +74,9 @@ func (s *Server) handleClientConfig(w http.ResponseWriter, r *http.Request) {
 	def := r.URL.Query().Get("default")
 	if def == "" {
 		def = models[0].ID
+		if d := s.mgr.DefaultModel(); hasModel(models, d) {
+			def = d
+		}
 	} else if !hasModel(models, def) {
 		http.Error(w, fmt.Sprintf("default %q is not a model here", def), http.StatusBadRequest)
 		return
