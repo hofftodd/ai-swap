@@ -271,6 +271,10 @@ table.fleet { border-collapse: collapse; width: 100%; table-layout: fixed; }
 .fleet .state { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
 .fleet .sub { color: var(--muted); font-size: 12px; }
 .fleet .errtxt { color: var(--bad); font-size: 12px; }
+.fleet .ctl { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; color: var(--muted); font-size: 12px; }
+.fleet .ctl label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.fleet .ctl input { margin: 0; accent-color: var(--accent); }
+.fleet .ctl input:disabled + span { opacity: .6; }
 @media (max-width: 760px) {
   .fleet .hide-n { display: none; }
   .fleet col.c-act { width: 124px; }
@@ -757,6 +761,7 @@ function renderModelList() {
         <button class="model-row" data-model="${esc(m.id)}" data-k="m:${esc(m.id)}" tabindex="${m.id === selected ? 0 : -1}" aria-current="${m.id === selected}" title="${esc(m.id)} on ${esc(m.node)}">
           <span class="dot ${esc(m.state)}" aria-hidden="true"></span><span class="mname">${esc(name)}</span>
           ${m.resident ? `<span class="pill" title="Kept loaded by default; gives way when another model needs the memory">resident</span>` : ""}
+          ${m.default ? `<span class="pill" title="Serves requests that name no model (or &quot;default&quot;) on ${esc(m.node)}">default</span>` : ""}
           ${w.text && w.cls !== "quiet" ? `<span class="state ${w.cls}">${esc(w.text)}</span>` : `<span class="size">${gb(m.memory_gb)}</span>`}
           <span class="sr-only">${esc(w.text || "not loaded")}</span>
         </button>
@@ -945,7 +950,7 @@ function renderFleet() {
       for (const m of list) {
         const w = stateWord(m), p = pending.get(m.id), isup = isUp(m);
         html += `<tr class="${isup ? "up" : ""}">
-          <td><span class="dot inl ${esc(m.state)}" aria-hidden="true"></span><span class="mn">${esc(m.name)}</span> ${m.resident ? `<span class="pill">resident</span>` : ""}${m.id !== m.name ? `<div class="sub">id ${esc(m.id)}</div>` : ""}${m.aliases?.length ? `<div class="sub al">aliases: ${esc(m.aliases.join(", "))}</div>` : ""}</td>
+          <td><span class="dot inl ${esc(m.state)}" aria-hidden="true"></span><span class="mn">${esc(m.name)}</span> ${m.resident ? `<span class="pill">resident</span>` : ""}${m.default ? `<span class="pill">default</span>` : ""}${m.id !== m.name ? `<div class="sub">id ${esc(m.id)}</div>` : ""}${m.aliases?.length ? `<div class="sub al">aliases: ${esc(m.aliases.join(", "))}</div>` : ""}${settingControls(m, nd)}</td>
           <td class="nw hide-s"><span class="state"><span class="dot ${esc(m.state)}"></span>${esc(w.text || (m.state === "stopped" ? "not loaded" : m.state))}</span>${m.error ? `<div class="errtxt">${esc(m.error)}</div>` : ""}</td>
           <td class="nw num hide-n">${m.memory_gb ? gb(m.memory_gb) : "—"}</td>
           <td class="nw num hide-n">${m.ctx ? fmtTok(m.ctx) : "—"}</td>
@@ -959,6 +964,45 @@ function renderFleet() {
     html += `</section>`;
   }
   setHTML($("fleet"), html);
+}
+
+// ---- resident and default models (per machine; PUT /api/settings and friends) -------------
+
+// Settings act on the copy on m's machine: "name@node" makes ai-swap forward
+// to that peer when it isn't this one.
+const settingRef = (m) => m.name + "@" + m.node;
+const settingPending = new Set();
+function settingControls(m, nd) {
+  const ref = settingRef(m), busy = settingPending.has(ref) ? " disabled" : "";
+  return `<div class="ctl">
+    <label title="Keep loaded on ${esc(nd.name)}: loaded now and after restarts, never unloaded for being idle; gives way when another model needs the memory"><input type="checkbox" data-act="resident" data-ref="${esc(ref)}" data-k="res:${esc(ref)}"${m.resident ? " checked" : ""}${busy}><span>keep loaded</span></label>
+    <label title="Serves requests on ${esc(nd.name)} that name no model, or the model &quot;default&quot;"><input type="radio" name="def:${esc(nd.name)}" data-act="default" data-ref="${esc(ref)}" data-k="def:${esc(ref)}"${m.default ? " checked" : ""}${busy}><span>default</span></label></div>`;
+}
+
+async function settingAction(ref, act, on) {
+  const m = fleet.find(x => settingRef(x) === ref);
+  if (settingPending.has(ref) || (act === "default" && m?.default)) return;
+  if (act === "resident" && on && m) {
+    const nd = nodes.find(n => n.name === m.node);
+    const free = nd?.budget ? nd.budget - nd.used : Infinity;
+    if (!isUp(m) && (m.memory_gb || 0) > free && !confirm(`Keeping ${m.name} loaded on ${m.node} loads it now, unloading idle models there to make room. Go ahead?`)) { renderFleet(); return; }
+  }
+  settingPending.add(ref); renderFleet();
+  const url = `/api/models/${encodeURIComponent(ref)}/${act}`;
+  const method = act === "resident" && !on ? "DELETE" : "POST";
+  try {
+    const r = await fetch(url, { method });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body.error?.message || body.error || r.statusText);
+    const name = m?.name || ref;
+    toast(act === "default" ? `${name} is now the default on ${body.node}.`
+      : on ? `${name} is kept loaded on ${body.node}${body.loading?.length ? "; loading it now" : ""}.`
+      : `${name} is no longer kept loaded on ${body.node}; it unloads once idle past its TTL.`);
+  } catch (e) {
+    toast(`Couldn't change ${ref}: ${e.message}`, "bad", 8000);
+  } finally {
+    settingPending.delete(ref); refresh();
+  }
 }
 
 // ---- load / unload / logs ----------------------------------------------------
@@ -1443,6 +1487,7 @@ $("fleet").addEventListener("click", (e) => {
   if (b.dataset.act === "logs") openLogs(b.dataset.ref);
   else if (b.dataset.act === "chat") { showView("chat"); selectModel(b.dataset.ref); }
   else if (b.dataset.act === "release") releaseLock(b.dataset.ref);
+  else if (b.dataset.act === "resident" || b.dataset.act === "default") settingAction(b.dataset.ref, b.dataset.act, b.checked);
   else modelAction(b.dataset.ref, b.dataset.act);
 });
 $("side").addEventListener("click", (e) => { if (e.target.closest("[data-close]")) closeDrawers(); });

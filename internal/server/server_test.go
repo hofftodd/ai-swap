@@ -69,6 +69,8 @@ func startBackend(l *engine.Launch, _ *process.RingBuffer) (scheduler.Handle, er
 type node struct {
 	url   string
 	mgr   *scheduler.Manager
+	srv   *Server
+	cfg   *config.Config
 	close func() // stops the node's HTTP server, as if the machine went away
 }
 
@@ -101,7 +103,8 @@ func newNodeWithKey(t *testing.T, yaml, key string, peers ...string) *node {
 	cl.SetSelf(cfg.Node.Name)
 	ctx, cancel := context.WithCancel(context.Background())
 	go cl.Run(ctx, time.Hour)
-	ts := httptest.NewServer(New(cfg, mgr, cl, nil, log).Handler())
+	sv := New(cfg, mgr, cl, nil, log)
+	ts := httptest.NewServer(sv.Handler())
 	var once sync.Once
 	closeTS := func() { once.Do(ts.Close) }
 	t.Cleanup(func() { cancel(); closeTS(); mgr.StopAll() })
@@ -114,7 +117,7 @@ func newNodeWithKey(t *testing.T, yaml, key string, peers ...string) *node {
 			time.Sleep(10 * time.Millisecond)
 		}
 	}
-	return &node{url: ts.URL, mgr: mgr, close: closeTS}
+	return &node{url: ts.URL, mgr: mgr, srv: sv, cfg: cfg, close: closeTS}
 }
 
 func allOnline(cl *cluster.Cluster) bool {

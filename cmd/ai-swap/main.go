@@ -28,6 +28,7 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to config file")
 	listen := flag.String("listen", "", "override node.listen")
 	check := flag.Bool("check", false, "validate the config, print launch commands, and exit")
+	statePath := flag.String("state", "", "settings changed at runtime (resident and default models); default state.yaml next to the config")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 	if *showVersion {
@@ -36,16 +37,32 @@ func main() {
 	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	if err := run(*cfgPath, *listen, *check, log); err != nil {
+	if err := run(*cfgPath, *listen, *statePath, *check, log); err != nil {
 		fmt.Fprintln(os.Stderr, "ai-swap:", err)
 		os.Exit(1)
 	}
 }
 
-func run(cfgPath, listen string, check bool, log *slog.Logger) error {
+func run(cfgPath, listen, statePath string, check bool, log *slog.Logger) error {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return err
+	}
+	// Runtime settings (state.yaml) apply on top of the config. -check
+	// validates a config on its own (llama-config checks a draft in a temp
+	// dir), so it reads state only when -state names it.
+	if statePath == "" && !check {
+		statePath = config.StatePath(cfgPath)
+	}
+	base := server.BaseState(cfg)
+	var over config.State
+	if statePath != "" {
+		if over, err = config.LoadState(statePath); err != nil {
+			return err
+		}
+		for _, w := range cfg.ApplyState(over) {
+			log.Warn(w, "state", statePath)
+		}
 	}
 	if listen != "" {
 		cfg.Node.Listen = listen
@@ -75,6 +92,7 @@ func run(cfgPath, listen string, check bool, log *slog.Logger) error {
 	go cl.Run(ctx, 10*time.Second)
 
 	sv := server.New(cfg, mgr, cl, web.FS(), log)
+	sv.EnableSettings(statePath, base, over)
 	go sv.ExpireLocks(ctx, 5*time.Second)
 	go sv.ExpireLeases(ctx, 5*time.Second)
 	srv := &http.Server{
@@ -110,6 +128,9 @@ func printPlan(cfg *config.Config, mgr *scheduler.Manager) error {
 	fmt.Printf("node %q listen %s budget %.0f GB\n", cfg.Node.Name, cfg.Node.Listen, cfg.Node.MemoryBudgetGB)
 	if len(cfg.Node.Resident) > 0 {
 		fmt.Printf("resident: %s\n", strings.Join(cfg.Node.Resident, ", "))
+	}
+	if cfg.Node.DefaultModel != "" {
+		fmt.Printf("default: %s\n", cfg.Node.DefaultModel)
 	}
 	next := cfg.Node.PortRange[0]
 	alloc := func() (int, error) { next++; return next - 1, nil }
