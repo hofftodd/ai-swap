@@ -111,10 +111,11 @@ func (b *builtin) Build(m *config.Model, ec config.EngineConfig, allocPort func(
 		return l, nil
 	}
 
-	if b.bin == "" && ec.Bin == "" {
+	bin := firstNonEmpty(m.Bin, ec.Bin, b.bin)
+	if bin == "" {
 		return nil, fmt.Errorf("engine %s needs cmd", b.name)
 	}
-	argv := []string{firstNonEmpty(ec.Bin, b.bin)}
+	argv := []string{bin}
 	argv = append(argv, b.subcmd...)
 	if m.Model != "" && b.modelFlag != "" {
 		v := m.Model

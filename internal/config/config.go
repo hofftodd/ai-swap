@@ -86,6 +86,9 @@ type Model struct {
 	Engine string `yaml:"engine"`
 	// Model is the model path or identifier the engine expects.
 	Model string `yaml:"model"`
+	// Bin overrides the engine's binary for this model, e.g. a newer
+	// llama-server build that a new architecture needs.
+	Bin string `yaml:"bin"`
 	// Ctx is the context length; 0 leaves it to the engine.
 	Ctx int `yaml:"ctx"`
 	// Args are extra command-line arguments.
@@ -193,6 +196,7 @@ func (c *Config) applyDefaults() {
 		}
 		m.Name = name
 		m.Model = ExpandHome(m.Model)
+		m.Bin = ExpandHome(m.Bin)
 		m.Args = expandAll(m.Args)
 		if m.TTL == nil {
 			t := c.Defaults.TTL

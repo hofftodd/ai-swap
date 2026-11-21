@@ -245,6 +245,7 @@ models:
     health_path: /v1/models  # readiness URL; engine default if omitted
     port: 8000               # force a fixed port
     upstream_model: ""       # rewrite "model" before sending to the engine
+    bin: ""                  # this model's server binary, instead of engines.<engine>.bin
     cmd: ""                  # replace the whole command; see below
     params: ""               # e.g. "35B": shown in the UI when the files don't say
     active_params: ""        # e.g. "3B": per token, for mixture-of-experts models
