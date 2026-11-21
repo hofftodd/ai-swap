@@ -25,6 +25,13 @@ func TestBuildCommands(t *testing.T) {
 			wantPort: 9100,
 		},
 		{
+			engine:   "llamacpp",
+			model:    config.Model{Name: "q2", Bin: "/src/new/llama-server", Model: "/m/q.gguf"},
+			ec:       config.EngineConfig{Bin: "/usr/bin/llama-server"},
+			wantArgv: []string{"/src/new/llama-server", "-m", "/m/q.gguf", "--host", "127.0.0.1", "--port", "9100", "--metrics"},
+			wantPort: 9100,
+		},
+		{
 			engine:   "sushi",
 			model:    config.Model{Name: "s", Model: "/m/sushi", Ctx: 131072, Args: []string{"--no-vision"}},
 			ec:       config.EngineConfig{Bin: "/opt/homebrew/bin/sushi"},

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Models can set `bin:` to use their own server binary instead of the engine's,
+  for a model whose architecture needs a newer build than the rest (Inkling 2
+  Mini's looped layers on llama.cpp, 2026-11-21).
+
 - Engine `splash`: [Splash](https://github.com/incoai/splash) (DFlash2 speculative
   decoding, Apple Silicon). `model:` is a local GGUF file or GGUF/MLX folder,
   or a Hugging Face `OWNER/REPO:VARIANT`; local models are served under
