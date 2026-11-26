@@ -928,6 +928,25 @@ function clientsBar() {
     ${CLIENTS.map(([c, label, path]) => `<a class="btn small" href="/api/clients/${c}${def}" download data-k="cl:${c}" title="Save as ${esc(path)}. Replaces the whole file; to merge into an existing one, use ai-swap-clients.">${esc(label)}</a>`).join("")}</div>`;
 }
 
+// A plain <a download> can't carry the API key, so a keyed ai-swap answers it with 401 and the browser
+// reports "file not available". Fetch it like any API call (with the key) and save the result instead.
+document.addEventListener("click", async (e) => {
+  const a = e.target.closest(".clients a[download]");
+  if (!a) return;
+  e.preventDefault();
+  try {
+    const r = await fetch(a.getAttribute("href"));
+    if (!r.ok) throw new Error((await r.text()).trim() || `HTTP ${r.status}`);
+    const name = /filename="([^"]+)"/.exec(r.headers.get("Content-Disposition") || "")?.[1] || "config";
+    const url = URL.createObjectURL(await r.blob());
+    const tmp = Object.assign(document.createElement("a"), { href: url, download: name });
+    document.body.appendChild(tmp); tmp.click(); tmp.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (err) {
+    toast(`Couldn’t download the ${a.textContent.trim()} config: ${err.message}`, "bad");
+  }
+});
+
 function renderFleet() {
   if ($("view-models").classList.contains("hidden")) return;
   const up = fleet.filter(isUp).length;
